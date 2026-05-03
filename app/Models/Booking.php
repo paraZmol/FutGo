@@ -29,7 +29,11 @@ class Booking extends Model
     {
         static::creating(function (self $booking) {
             if (!$booking->qr_token) {
-                $booking->qr_token = strtoupper('FUTGO-' . Str::random(8));
+                // Reintento en caso de colisión de token
+                do {
+                    $token = strtoupper('FUTGO-' . Str::random(10));
+                } while (static::where('qr_token', $token)->exists());
+                $booking->qr_token = $token;
             }
         });
     }

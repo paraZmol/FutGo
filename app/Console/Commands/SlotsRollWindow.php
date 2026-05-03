@@ -16,7 +16,11 @@ class SlotsRollWindow extends Command
     {
         $this->info('Iniciando ventana movil de 30 dias...');
         $start   = microtime(true);
-        $fields  = Field::with('operatingHours')->where('status', 'active')->get();
+        // Solo canchas activas de venues activos — no generar slots para suspendidos/pendientes
+        $fields  = Field::with('operatingHours')
+            ->where('status', 'active')
+            ->whereHas('venue', fn($q) => $q->where('status', 'active'))
+            ->get();
         $target  = Carbon::today()->addDays(30);
         $created = 0;
         $deleted = 0;

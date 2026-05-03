@@ -6,7 +6,8 @@
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>FutGo Staff</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <title>{{ App\Models\SiteSetting::get('site_name','FutGo') }} Staff</title>
 
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {

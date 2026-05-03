@@ -224,7 +224,7 @@ $slots = $primeraCanchaActiva
                 </div>
 
                 {{-- Slots --}}
-                <div class="grid grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-3 relative z-10">
+                <div class="grid grid-cols-3 xs:grid-cols-4 sm:grid-cols-6 lg:grid-cols-8 gap-2 relative z-10">
                     @foreach($slots as $slot)
                     @if($slot['estado'] === 'available')
                     <button onclick="toggleSlot(this)"

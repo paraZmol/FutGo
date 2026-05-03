@@ -1,12 +1,14 @@
 <?php
 
 use App\Models\Booking;
+use App\Models\City;
+use App\Models\AuditLog;
+use App\Models\Transaction;
 use App\Models\Venue;
 use App\Models\User;
 use App\Models\Slot;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
-use Carbon\Carbon;
 
 // ─────────────────────────────────────────────────────────────
 // PÚBLICO
@@ -123,7 +125,7 @@ Route::post('/registro', function () {
         'terminos.accepted' => 'Debés aceptar los términos y condiciones.',
     ]);
 
-    $user = User::create([
+    $user = User::forceCreate([
         'name'     => $data['nombre'],
         'email'    => $data['email'],
         'password' => $data['password'],
@@ -163,10 +165,10 @@ Route::post('/registro-partner', function () {
     ]);
 
     // Crear usuario partner con estado pendiente (sin contraseña — se enviará por email al aprobar)
-    $user = User::create([
+    $user = User::forceCreate([
         'name'     => $data['nombre'],
         'email'    => $data['email'],
-        'password' => bcrypt(str_random(32)), // temporal, se resetea al aprobar
+        'password' => bcrypt(\Illuminate\Support\Str::random(32)), // temporal, se resetea al aprobar
         'phone'    => $data['whatsapp'],
         'role'     => 'partner',
     ]);
@@ -270,6 +272,64 @@ Route::middleware('auth')->group(function () {
         return view('user.reservas', ['proxima' => $booking, 'activas' => collect(), 'historial' => collect()]);
     });
 
+    // Crear booking real desde el checkout
+    Route::post('/booking/crear', function () {
+        $fieldId  = (int) request('field_id');
+        $slotIds  = json_decode(request('slot_ids', '[]'), true);
+        $metodo   = request('metodo', 'yape');
+        $total    = (float) request('total', 0);
+        $anticipo = (float) request('anticipo', 0);
+        $balance  = round($total - $anticipo, 2);
+
+        if (!$fieldId || empty($slotIds)) {
+            return redirect()->back()->withErrors(['error' => 'Datos de reserva incompletos.']);
+        }
+
+        // Verificar disponibilidad antes de iniciar la transacción
+        $slots = Slot::whereIn('id', $slotIds)->where('status', 'available')->get();
+        if ($slots->count() !== count($slotIds)) {
+            return redirect()->back()->withErrors(['error' => 'Uno o más horarios ya no están disponibles. Por favor elegí otro turno.']);
+        }
+
+        // Envolver todo en una transacción — si algo falla, nada se guarda
+        $booking = \DB::transaction(function () use ($fieldId, $slotIds, $metodo, $total, $anticipo, $balance, $slots) {
+            $booking = Booking::create([
+                'user_id'        => Auth::id(),
+                'field_id'       => $fieldId,
+                'status'         => 'confirmed',
+                'total_price'    => $total,
+                'deposit_amount' => $anticipo,
+                'balance_due'    => $balance,
+                'platform_fee'   => 0,
+                'payment_status' => 'paid',
+                'payment_method' => $metodo,
+                'is_walkin'      => false,
+            ]);
+
+            foreach ($slots as $slot) {
+                \DB::table('booking_slots')->insert([
+                    'booking_id' => $booking->id,
+                    'slot_id'    => $slot->id,
+                    'unit_price' => $slot->unit_price,
+                ]);
+                $slot->update(['status' => 'reserved', 'booking_id' => $booking->id]);
+            }
+
+            Transaction::create([
+                'booking_id'     => $booking->id,
+                'amount'         => $anticipo,
+                'type'           => 'deposit',
+                'payment_method' => $metodo,
+                'status'         => 'approved',
+                'gateway'        => $metodo,
+            ]);
+
+            return $booking;
+        });
+
+        return redirect('/reservas')->with('success', '¡Reserva confirmada! Tu QR está listo.');
+    });
+
     // GET para acceso directo / POST para envío seguro desde detalle
     Route::match(['get','post'], '/checkout', function () {
         $slotsParam = request('slots', '');
@@ -295,7 +355,7 @@ Route::post('/partner/switch-venue', function () {
     return back();
 })->middleware('auth')->name('partner.switch-venue');
 
-Route::middleware('auth')->prefix('partner')->group(function () {
+Route::middleware(['auth', 'role:partner,admin'])->prefix('partner')->group(function () {
 
     $partnerData = function (array $relations = []) {
         $user     = Auth::user();
@@ -353,7 +413,90 @@ Route::middleware('auth')->prefix('partner')->group(function () {
     });
 
     Route::get('/reservas/nueva', fn() => view('partner.reservas'));
-    Route::get('/analitica',      fn() => view('partner.analitica'));
+    Route::get('/analitica', function () use ($partnerData) {
+        $data  = $partnerData(['fields']);
+        $venue = $data['venue'];
+
+        // Bookings del venue activo
+        $bookings = $venue
+            ? Booking::whereHas('field', fn($q) => $q->where('venue_id', $venue->id))
+                ->with(['field', 'slots', 'transactions'])
+                ->get()
+            : collect();
+
+        // KPIs del mes actual
+        $mesActual   = $bookings->filter(fn($b) => $b->created_at->month === now()->month);
+        $mesAnterior = $bookings->filter(fn($b) => $b->created_at->month === now()->subMonth()->month);
+
+        $kpis = [
+            'ingresos_mes'    => $mesActual->whereIn('status',['confirmed','completed','checked_in'])->sum('total_price'),
+            'ingresos_ant'    => $mesAnterior->whereIn('status',['confirmed','completed','checked_in'])->sum('total_price'),
+            'reservas_mes'    => $mesActual->count(),
+            'reservas_ant'    => $mesAnterior->count(),
+            'noshow_mes'      => $mesActual->where('status','no_show')->count(),
+            'noshow_ant'      => $mesAnterior->where('status','no_show')->count(),
+        ];
+
+        // Ingresos por mes (últimos 6)
+        $ingresosPorMes = collect();
+        for ($i = 5; $i >= 0; $i--) {
+            $m = now()->subMonths($i);
+            $ing = $bookings
+                ->filter(fn($b) => $b->created_at->format('Y-m') === $m->format('Y-m'))
+                ->whereIn('status',['confirmed','completed','checked_in'])
+                ->sum('total_price');
+            $ingresosPorMes->push(['mes' => $m->format('M'), 'total' => (float) $ing]);
+        }
+
+        // Horarios más populares
+        $horarios = $bookings->flatMap(fn($b) => $b->slots)
+            ->groupBy(fn($s) => $s->starts_at->format('H:00'))
+            ->map(fn($g, $h) => ['hora' => $h, 'reservas' => $g->count()])
+            ->sortByDesc('reservas')->take(6)->values();
+
+        // Canal de reservas
+        $totalRes = max($bookings->count(), 1);
+        $canales = [
+            ['canal' => 'App',        'reservas' => $bookings->where('is_walkin', false)->count()],
+            ['canal' => 'Presencial', 'reservas' => $bookings->where('is_walkin', true)->count()],
+        ];
+        foreach ($canales as &$c) { $c['pct'] = round($c['reservas'] / $totalRes * 100); }
+
+        // Días más activos
+        $diasNombres = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb'];
+        $diasActivos = $bookings->flatMap(fn($b) => $b->slots)
+            ->groupBy(fn($s) => $s->starts_at->dayOfWeek)
+            ->map(fn($g, $d) => ['dia' => $diasNombres[$d], 'reservas' => $g->count()])
+            ->sortKeys()->values();
+
+        // Top clientes
+        $topClientes = $bookings->whereIn('status',['confirmed','completed','checked_in'])
+            ->groupBy('user_id')
+            ->map(fn($group) => [
+                'nombre'   => $group->first()->user?->name ?? 'Jugador',
+                'reservas' => $group->count(),
+                'gasto'    => $group->sum('total_price'),
+            ])
+            ->sortByDesc('reservas')->take(5)->values();
+
+        // Incumplidores (no-shows)
+        $incumplidores = $bookings->groupBy('user_id')
+            ->map(fn($group) => [
+                'nombre'  => $group->first()->user?->name ?? 'Jugador',
+                'total'   => $group->count(),
+                'noshow'  => $group->where('status','no_show')->count(),
+            ])
+            ->filter(fn($u) => $u['noshow'] > 0)
+            ->map(fn($u) => array_merge($u, [
+                'tasa'   => round($u['noshow'] / max($u['total'],1) * 100),
+                'riesgo' => $u['noshow'] >= 2 ? 'alto' : 'medio',
+            ]))
+            ->sortByDesc('tasa')->take(5)->values();
+
+        return view('partner.analitica', array_merge($data, compact(
+            'kpis','ingresosPorMes','horarios','canales','diasActivos','topClientes','incumplidores'
+        )));
+    });
     Route::get('/ingresos',       fn() => view('partner.ingresos'));
 });
 
@@ -362,6 +505,54 @@ Route::middleware('auth')->prefix('partner')->group(function () {
 // ─────────────────────────────────────────────────────────────
 
 // Check-in real: valida QR y actualiza booking + shift_movement
+Route::middleware(['auth', 'role:staff,admin'])->group(function () {
+
+// Abrir turno — valida que no haya otro turno abierto
+Route::post('/staff/turno/abrir', function () {
+    $user    = Auth::user();
+    $venueId = request('venue_id');
+
+    $turnoAbierto = \App\Models\ShiftLog::where('user_id', $user->id)
+        ->whereNull('closed_at')->exists();
+
+    if ($turnoAbierto) {
+        return response()->json(['ok' => false, 'error' => 'Ya tenés un turno abierto. Cerralo antes de abrir uno nuevo.'], 422);
+    }
+
+    $turno = \App\Models\ShiftLog::create([
+        'venue_id'     => $venueId,
+        'user_id'      => $user->id,
+        'opened_at'    => now(),
+        'opening_cash' => (float) request('opening_cash', 0),
+    ]);
+
+    return response()->json(['ok' => true, 'turno_id' => $turno->id, 'inicio' => $turno->opened_at->format('H:i')]);
+});
+
+// Cerrar turno
+Route::post('/staff/turno/cerrar', function () {
+    $user  = Auth::user();
+    $turno = \App\Models\ShiftLog::where('user_id', $user->id)
+        ->whereNull('closed_at')->latest('opened_at')->first();
+
+    if (!$turno) {
+        return response()->json(['ok' => false, 'error' => 'No tenés un turno abierto.'], 422);
+    }
+
+    $totalMovimientos = $turno->movements()->sum('amount');
+    $diferencia       = round($totalMovimientos - (float) request('delivered_cash', $totalMovimientos), 2);
+
+    $turno->update([
+        'closed_at'      => now(),
+        'expected_cash'  => $totalMovimientos,
+        'delivered_cash' => (float) request('delivered_cash', $totalMovimientos),
+        'difference'     => $diferencia,
+        'notes'          => request('notes'),
+    ]);
+
+    return response()->json(['ok' => true, 'diferencia' => $diferencia]);
+});
+
 Route::post('/staff/checkin', function () {
     $token   = strtoupper(trim(request('qr_token', '')));
     $user    = Auth::user();
@@ -415,44 +606,47 @@ Route::post('/staff/walkin', function () {
     $monto   = (float) request('monto', 70);
     $nombre  = request('nombre', 'Presencial');
 
-    // Buscar slot disponible
+    // Verificar turno abierto — sin turno no se puede registrar presencial
+    $turno = \App\Models\ShiftLog::where('user_id', $user->id)
+        ->whereNull('closed_at')->latest('opened_at')->first();
+
+    if (!$turno) {
+        return response()->json(['ok' => false, 'error' => 'No tenés un turno abierto. Abrí tu turno antes de registrar presenciales.'], 422);
+    }
+
     $slot = \App\Models\Slot::where('field_id', $fieldId)
         ->where('status', 'available')
         ->whereDate('starts_at', today())
         ->where('starts_at', today()->setTimeFromTimeString($hora))
         ->first();
 
-    // Crear booking de presencial
-    $booking = Booking::create([
-        'user_id'        => $user->id,
-        'field_id'       => $fieldId,
-        'staff_id'       => $user->id,
-        'status'         => 'checked_in',
-        'total_price'    => $monto,
-        'deposit_amount' => $monto,
-        'balance_due'    => 0,
-        'platform_fee'   => 0,
-        'payment_status' => 'paid',
-        'payment_method' => 'efectivo',
-        'is_walkin'      => true,
-        'notes'          => $nombre,
-        'checked_in_at'  => now(),
-    ]);
-
-    if ($slot) {
-        $slot->update(['status' => 'reserved', 'booking_id' => $booking->id]);
-        \DB::table('booking_slots')->insert([
-            'booking_id' => $booking->id,
-            'slot_id'    => $slot->id,
-            'unit_price' => $monto,
+    // Todo en una transacción — si algo falla no queda nada a medias
+    $booking = \DB::transaction(function () use ($user, $fieldId, $monto, $nombre, $slot, $turno) {
+        $booking = Booking::create([
+            'user_id'        => $user->id,
+            'field_id'       => $fieldId,
+            'staff_id'       => $user->id,
+            'status'         => 'checked_in',
+            'total_price'    => $monto,
+            'deposit_amount' => $monto,
+            'balance_due'    => 0,
+            'platform_fee'   => 0,
+            'payment_status' => 'paid',
+            'payment_method' => 'efectivo',
+            'is_walkin'      => true,
+            'notes'          => $nombre,
+            'checked_in_at'  => now(),
         ]);
-    }
 
-    // Registrar en turno abierto
-    $turno = \App\Models\ShiftLog::where('user_id', $user->id)
-        ->whereNull('closed_at')->latest('opened_at')->first();
+        if ($slot) {
+            $slot->update(['status' => 'reserved', 'booking_id' => $booking->id]);
+            \DB::table('booking_slots')->insert([
+                'booking_id' => $booking->id,
+                'slot_id'    => $slot->id,
+                'unit_price' => $monto,
+            ]);
+        }
 
-    if ($turno) {
         \App\Models\ShiftMovement::create([
             'shift_log_id' => $turno->id,
             'booking_id'   => $booking->id,
@@ -460,12 +654,16 @@ Route::post('/staff/walkin', function () {
             'amount'       => $monto,
             'description'  => "Presencial: $nombre",
         ]);
-    }
+
+        return $booking;
+    });
 
     return response()->json(['ok' => true, 'booking_id' => $booking->id]);
-})->middleware('auth');
+});  // fin grupo staff/checkin + staff/walkin
 
-Route::get('/staff', function () {
+}); // fin middleware role:staff,admin
+
+Route::middleware(['auth', 'role:staff,admin'])->get('/staff', function () {
     $user = Auth::user();
     // Obtener el venue del staff
     $venueStaff = $user ? \DB::table('venue_staff')
@@ -495,7 +693,7 @@ Route::get('/staff', function () {
 // ADMIN
 // ─────────────────────────────────────────────────────────────
 
-Route::middleware('auth')->prefix('admin')->group(function () {
+Route::middleware(['auth', 'role:admin'])->prefix('admin')->group(function () {
 
     Route::get('/', function () {
         $kpis = [
@@ -578,7 +776,49 @@ Route::middleware('auth')->prefix('admin')->group(function () {
         ];
         return view('admin.reservas', compact('reservas', 'stats'));
     });
-    Route::get('/disputas',   fn() => view('admin.disputas'));
+    Route::get('/disputas', function () {
+        $disputas = \App\Models\Dispute::with(['booking.user', 'booking.field.venue', 'resolver'])
+            ->orderBy('estado')
+            ->orderByDesc('created_at')
+            ->get();
+        $stats = [
+            'abiertas'  => $disputas->where('estado', 'abierta')->count(),
+            'resueltas' => $disputas->where('estado', 'resuelta')->count(),
+        ];
+        return view('admin.disputas', compact('disputas', 'stats'));
+    });
+
+    Route::post('/disputas/{id}/resolver', function ($id) {
+        $data = request()->validate([
+            'resolucion' => 'required|string|min:10|max:1000',
+        ], [
+            'resolucion.required' => 'Debés escribir una resolución.',
+            'resolucion.min'      => 'La resolución debe tener al menos 10 caracteres.',
+            'resolucion.max'      => 'La resolución no puede superar 1000 caracteres.',
+        ]);
+
+        $disputa = \App\Models\Dispute::findOrFail($id);
+
+        // Solo disputas abiertas se pueden resolver
+        if ($disputa->estado === 'resuelta') {
+            return back()->withErrors(['error' => 'Esta disputa ya fue resuelta.']);
+        }
+
+        $disputa->update([
+            'estado'      => 'resuelta',
+            'resolucion'  => $data['resolucion'],
+            'resolved_by' => Auth::id(),
+            'resolved_at' => now(),
+        ]);
+
+        AuditLog::record('DISPUTA_RESUELTA', $disputa, [
+            'booking_id' => $disputa->booking_id,
+            'tipo'       => $disputa->tipo,
+            'resolucion' => $data['resolucion'],
+        ]);
+
+        return back()->with('success', 'Disputa marcada como resuelta.');
+    });
     Route::get('/fees',       fn() => view('admin.fees'));
     Route::get('/plataforma', fn() => view('admin.plataforma'));
     Route::get('/auditoria',  fn() => view('admin.auditoria'));

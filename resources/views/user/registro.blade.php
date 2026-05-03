@@ -105,6 +105,7 @@
                 </label>
 
                 <button type="submit"
+                        onclick="this.disabled=true;this.innerHTML='<i class=\'ph-bold ph-spinner-gap animate-spin text-lg\'></i> Creando cuenta...';this.form.submit();"
                         class="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-brand-500/30 mt-2 text-base">
                     Crear mi cuenta <i class="ph-bold ph-arrow-right text-lg"></i>
                 </button>

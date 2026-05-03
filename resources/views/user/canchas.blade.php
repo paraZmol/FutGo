@@ -47,7 +47,7 @@ $canchas = [
                 <div class="flex flex-col w-full">
                     <span class="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider leading-none mb-1">¿Dónde?</span>
                     <input type="text" name="ubicacion" placeholder="Ciudad, distrito o local..."
-                           value="{{ request('ubicacion', 'Cusco, Wanchaq') }}"
+                           value="{{ request('ubicacion') }}"
                            class="bg-transparent text-sm font-medium outline-none w-full text-slate-900 dark:text-white placeholder-slate-400 leading-none">
                 </div>
             </div>

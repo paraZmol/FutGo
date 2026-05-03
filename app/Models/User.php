@@ -11,8 +11,9 @@ class User extends Authenticatable
 {
     use HasFactory, Notifiable, SoftDeletes;
 
+    // 'role' NO está en fillable — se asigna solo internamente
     protected $fillable = [
-        'name', 'email', 'password', 'role',
+        'name', 'email', 'password',
         'phone', 'avatar_url', 'google_id', 'city_id',
         'fcm_token', 'push_opt_in', 'whatsapp_opt_in', 'last_login_at',
     ];

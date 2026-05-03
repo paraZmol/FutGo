@@ -4,16 +4,37 @@
 @section('content')
 
 @php
+// $slotsParam, $total, $venueId, $venue vienen del controlador (routes/web.php)
+// Parsear los slot IDs enviados desde el detalle de cancha
+$slotIds = [];
+if (!empty($slotsParam)) {
+    $decoded = json_decode($slotsParam, true);
+    $slotIds = is_array($decoded) ? $decoded : explode(',', $slotsParam);
+}
+
+$slots    = $slotIds ? App\Models\Slot::whereIn('id', $slotIds)->orderBy('starts_at')->get() : collect();
+$primerSlot = $slots->first();
+$ultimoSlot = $slots->last();
+
+// Datos del venue/cancha reales
+$imgDefault = 'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?w=600&q=80';
+
 $reserva = [
-    'cancha'    => 'Complejo Deportivo El 10',
-    'tipo'      => 'Fútbol 5',
-    'direccion' => 'Av. Los Incas 342, Wanchaq, Cusco',
-    'fecha'     => date('d M Y'),
-    'hora'      => '20:00 – 21:00',
-    'imagen'    => 'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?w=600&q=80',
-    'precio'    => 90.00,
-    'anticipo'  => 30.00,
-    'saldo'     => 60.00,
+    'venue_id'  => $venue?->id ?? $venueId,
+    'field_id'  => $primerSlot?->field_id,
+    'cancha'    => $venue?->name ?? 'Cancha',
+    'tipo'      => $primerSlot?->field?->sport_type ?? 'futbol5',
+    'direccion' => $venue ? ($venue->address . ', ' . $venue->district) : '–',
+    'fecha'     => $primerSlot ? $primerSlot->starts_at->format('d M Y') : date('d M Y'),
+    'hora'      => $primerSlot && $ultimoSlot
+        ? $primerSlot->starts_at->format('H:i') . ' – ' . $ultimoSlot->ends_at->format('H:i')
+        : '–',
+    'horas'     => $slots->count(),
+    'imagen'    => $imgDefault,
+    'precio'    => (float) $total,
+    'anticipo'  => round((float) $total * 0.35, 2),
+    'saldo'     => round((float) $total * 0.65, 2),
+    'slot_ids'  => $slotIds,
 ];
 @endphp
 
@@ -84,12 +105,12 @@ $reserva = [
                     </div>
                     <div class="flex items-center gap-2 bg-slate-50 dark:bg-white/5 rounded-xl px-3 py-2">
                         <i class="ph-fill ph-timer text-brand-500"></i>
-                        <span class="text-sm font-semibold text-slate-700 dark:text-white">1 hora</span>
+                        <span class="text-sm font-semibold text-slate-700 dark:text-white">{{ $reserva['horas'] }} hora{{ $reserva['horas'] > 1 ? 's' : '' }}</span>
                     </div>
                 </div>
             </div>
 
-            {{-- Datos del jugador --}}
+            {{-- Datos del jugador — pre-llenados si está logueado --}}
             <div class="glass-card rounded-2xl p-5">
                 <h3 class="font-bold text-slate-900 dark:text-white flex items-center gap-2 mb-4">
                     <i class="ph-fill ph-user-circle text-brand-500"></i> Tus datos
@@ -99,8 +120,8 @@ $reserva = [
                         <label class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5 block">Nombre</label>
                         <div class="flex items-center gap-3 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 bg-white dark:bg-white/5 focus-within:border-brand-500 transition-all">
                             <i class="ph-fill ph-user text-slate-400 shrink-0"></i>
-                            <input type="text" placeholder="Tu nombre completo"
-                                   class="flex-1 bg-transparent text-sm outline-none text-slate-900 dark:text-white placeholder-slate-400">
+                            <input type="text" value="{{ Auth::user()->name ?? '' }}" placeholder="Tu nombre completo"
+                                   class="flex-1 bg-transparent text-sm outline-none text-slate-900 dark:text-white placeholder-slate-400" readonly>
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-3">
@@ -108,8 +129,8 @@ $reserva = [
                             <label class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1.5 block">Email</label>
                             <div class="flex items-center gap-3 border border-slate-200 dark:border-white/10 rounded-xl px-4 py-3 bg-white dark:bg-white/5 focus-within:border-brand-500 transition-all">
                                 <i class="ph-fill ph-envelope text-slate-400 shrink-0"></i>
-                                <input type="email" placeholder="correo@email.com"
-                                       class="flex-1 bg-transparent text-sm outline-none text-slate-900 dark:text-white placeholder-slate-400 min-w-0">
+                                <input type="email" value="{{ Auth::user()->email ?? '' }}" placeholder="correo@email.com"
+                                       class="flex-1 bg-transparent text-sm outline-none text-slate-900 dark:text-white placeholder-slate-400 min-w-0" readonly>
                             </div>
                         </div>
                         <div>
@@ -202,10 +223,18 @@ $reserva = [
                     </div>
                 </div>
 
-                <button onclick="confirmarReserva()"
-                        class="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-brand-500/20 text-base mb-3">
-                    <i class="ph-bold ph-lock-simple"></i> Pagar S/ {{ number_format($reserva['anticipo'],2) }}
-                </button>
+                <form id="form-booking" action="/booking/crear" method="POST">
+                    @csrf
+                    <input type="hidden" name="field_id"    value="{{ $reserva['field_id'] }}">
+                    <input type="hidden" name="slot_ids"    value="{{ json_encode($reserva['slot_ids']) }}">
+                    <input type="hidden" name="total"       value="{{ $reserva['precio'] }}">
+                    <input type="hidden" name="anticipo"    value="{{ $reserva['anticipo'] }}">
+                    <input type="hidden" name="metodo"      id="metodo-pago" value="yape">
+                    <button type="submit"
+                            class="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-4 rounded-2xl flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-brand-500/20 text-base mb-3">
+                        <i class="ph-bold ph-lock-simple"></i> Confirmar — S/ {{ number_format($reserva['anticipo'],2) }}
+                    </button>
+                </form>
 
                 <div class="flex items-center justify-center gap-4 text-[10px] text-slate-400">
                     <span class="flex items-center gap-1"><i class="ph-fill ph-shield-check text-brand-500"></i> Pago seguro</span>
@@ -224,7 +253,7 @@ $reserva = [
         <span class="text-xs text-slate-500 dark:text-slate-400">Anticipo a pagar</span>
         <span class="font-extrabold text-brand-500 text-lg">S/ {{ number_format($reserva['anticipo'],2) }}</span>
     </div>
-    <button onclick="confirmarReserva()"
+    <button onclick="document.getElementById('form-booking').submit()"
             class="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3.5 rounded-2xl flex items-center justify-center gap-2 transition-colors shadow-lg shadow-brand-500/20">
         <i class="ph-bold ph-lock-simple"></i> Confirmar y pagar
     </button>
@@ -232,9 +261,12 @@ $reserva = [
 
 @push('scripts')
 <script>
-    function confirmarReserva() {
-        window.location.href = '/reservas';
-    }
+    // Sincronizar método de pago seleccionado con el form
+    document.querySelectorAll('input[name=metodo_pago]').forEach(r => {
+        r.addEventListener('change', () => {
+            document.getElementById('metodo-pago').value = r.value;
+        });
+    });
 </script>
 @endpush
 

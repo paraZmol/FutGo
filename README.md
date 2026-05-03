@@ -1,66 +1,119 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# 🏟️ FutGo | Sistema de Gestión y Reservas de Canchas Deportivas
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+![FutGo Banner](futgo_readme_banner_1777823008034.png)
 
-## About Laravel
+## 🌟 Visión del Proyecto
+FutGo es una plataforma integral diseñada para digitalizar y optimizar la experiencia de reserva de campos deportivos. Conecta a jugadores con complejos deportivos (Partners) a través de un ecosistema que incluye una PWA para Staff, paneles de administración avanzada y una interfaz de usuario intuitiva y de alto rendimiento.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## 🛠️ Stack Tecnológico
+*   **Core:** Laravel 11 (PHP 8.2+)
+*   **Base de Datos:** MySQL 8.0 (Motor transaccional con soporte Geospacial)
+*   **Frontend:** Blade Templates + Tailwind CSS + Vite
+*   **Iconografía:** Phosphor Icons
+*   **Infraestructura:** Soporte para Redis (Cache/Sessions) y Arquitectura Hexagonal.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+---
 
-## Learning Laravel
+## 🏗️ Arquitectura del Sistema
+El proyecto está en proceso de migración hacia una **Arquitectura Hexagonal (Puertos y Adaptadores)** para garantizar el desacoplamiento de la lógica de negocio y facilitar la escalabilidad.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+```mermaid
+graph TD
+    subgraph "Infrastructure Layer"
+        P[Persistence - MySQL]
+        A[External APIs - MercadoPago]
+        W[Web Controllers]
+    end
+    
+    subgraph "Application Layer"
+        UC[Use Cases / Services]
+    end
+    
+    subgraph "Domain Layer"
+        E[Entities]
+        VO[Value Objects]
+        R[Repository Interfaces]
+    end
+    
+    W --> UC
+    UC --> R
+    P -.-> R
+    UC --> E
+```
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+### Principios de Diseño
+1.  **Cero Cálculos en Memoria:** Búsquedas geospaciales delegadas a MySQL 8 mediante `ST_Distance_Sphere`.
+2.  **Concurrencia Garantizada:** Uso de *Optimistic Locking* (versión en slots) para evitar sobre-reservas.
+3.  **Inmutabilidad:** Registro de auditoría (`audit_logs`) y snapshots de precios en el momento de la reserva.
+4.  **Seguridad:** IDs públicos basados en UUIDs e idempotencia en transacciones financieras.
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+---
 
-## Laravel Sponsors
+## 📦 Módulos Principales
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+### 👤 Jugador (Player)
+*   Búsqueda avanzada por ubicación y tipo de campo.
+*   Reserva de múltiples slots contiguos.
+*   Checkout seguro con MercadoPago y anticipos online.
+*   Perfil con historial y QR dinámico de acceso.
 
-### Premium Partners
+### 🤝 Complejo (Partner)
+*   Dashboard de métricas e ingresos en tiempo real.
+*   Gestión de matriz de horarios y precios diferenciales (Día/Noche).
+*   Configuración de bloqueos especiales y eventos.
+*   Administración de Staff asignado.
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+### 📱 Staff PWA
+*   Interfaz optimizada para móviles (Offline-first ready).
+*   Escaneo de QR para Check-in instantáneo.
+*   Registro de reservas presenciales (*Walk-ins*).
+*   Gestión y auditoría de caja por turno.
 
-## Contributing
+### 🛡️ Administración (Admin)
+*   Aprobación y monitoreo de Partners.
+*   Configuración de comisiones y fees de plataforma.
+*   Trazabilidad total mediante logs de auditoría inmutables.
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+---
 
-## Code of Conduct
+## 🚀 Instalación y Configuración
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+1.  **Clonar el repositorio:**
+    ```bash
+    git clone <url-del-repo>
+    cd futbo2
+    ```
 
-## Security Vulnerabilities
+2.  **Instalar dependencias:**
+    ```bash
+    composer install
+    npm install
+    ```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+3.  **Configurar entorno:**
+    ```bash
+    cp .env.example .env
+    # Configurar las credenciales de MySQL 8 y Redis en .env
+    ```
 
-## License
+4.  **Ejecutar migraciones y seeders:**
+    ```bash
+    php artisan migrate --seed
+    ```
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+5.  **Compilar activos:**
+    ```bash
+    npm run dev
+    ```
+
+---
+
+## 🔍 Estado del Proyecto y Auditoría
+Actualmente el proyecto se encuentra en una fase de refactorización tras la migración a MySQL 8. Para consultar los detalles técnicos, deudas de arquitectura o bugs identificados, consulte nuestro archivo de auditoría interna:
+
+📄 **[errores.txt](errores.txt)**
+
+---
+Developed with ❤️ by the FutGo Team.

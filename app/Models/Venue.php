@@ -3,13 +3,20 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Venue extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'user_id', 'city_id', 'name', 'slug', 'description',
         'address', 'district', 'latitude', 'longitude',
-        'status', 'cover_image', 'phone',
+        'status', 'cover_image', 'phone', 'approved_at',
+    ];
+
+    protected $casts = [
+        'approved_at' => 'datetime',
     ];
 
     public function city()    { return $this->belongsTo(City::class); }

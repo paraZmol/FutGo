@@ -7,14 +7,16 @@ use Illuminate\Database\Eloquent\Model;
 class ShiftLog extends Model
 {
     protected $fillable = [
-        'venue_id', 'user_id', 'opened_at', 'closed_at',
-        'expected_cash', 'delivered_cash', 'notes',
+        'venue_id', 'user_id', 'opening_cash', 'opened_at', 'closed_at',
+        'expected_cash', 'delivered_cash', 'difference', 'notes',
     ];
 
     protected $casts = [
         'opened_at'      => 'datetime',
         'closed_at'      => 'datetime',
         'expected_cash'  => 'decimal:2',
+        'opening_cash'   => 'decimal:2',
+        'difference'     => 'decimal:2',
         'delivered_cash' => 'decimal:2',
     ];
 

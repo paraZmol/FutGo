@@ -13,9 +13,10 @@ use Carbon\Carbon;
 // ─────────────────────────────────────────────────────────────
 
 Route::get('/', function () {
+    // Limitado a 8 para el home — los slots se cargan solo para hoy
     $venues = Venue::with(['city', 'fields.slots' => fn($q) =>
         $q->where('status', 'available')->whereDate('starts_at', today())
-    ])->where('status', 'active')->get()
+    ])->where('status', 'active')->limit(8)->get()
     ->map(function ($v) {
         $v->disponible_hoy  = $v->fields->some(fn($f) => $f->slots->isNotEmpty());
         $v->precio_desde    = $v->fields->flatMap(fn($f) => $f->slots->pluck('unit_price'))->min() ?? 0;
@@ -46,13 +47,16 @@ Route::get('/canchas', function () {
         $query->whereHas('fields', fn($q) => $q->where('sport_type', $tipo));
     }
 
-    $venues = $query->get()->map(function ($v) {
+    // Paginado de 12 venues por página
+    $venuesPaginated = $query->paginate(12);
+    $venues = $venuesPaginated->getCollection()->map(function ($v) {
         $v->disponible   = $v->fields->some(fn($f) => $f->slots->isNotEmpty());
         $v->precio_desde = $v->fields->flatMap(fn($f) => $f->slots->pluck('unit_price'))->min() ?? 0;
         return $v;
     });
+    $venuesPaginated->setCollection($venues);
 
-    return view('user.canchas', compact('venues'));
+    return view('user.canchas', ['venues' => $venuesPaginated]);
 });
 
 Route::get('/canchas/{id}', function ($id) {
@@ -170,12 +174,14 @@ Route::middleware('auth')->group(function () {
         return view('user.reservas', ['proxima' => $booking, 'activas' => collect(), 'historial' => collect()]);
     });
 
-    Route::get('/checkout', function () {
+    // GET para acceso directo / POST para envío seguro desde detalle
+    Route::match(['get','post'], '/checkout', function () {
         $slotsParam = request('slots', '');
         $total      = (float) request('total', 0);
         $venueId    = request('venue_id');
+        $venue      = $venueId ? Venue::with(['city','fields'])->find($venueId) : null;
 
-        return view('user.checkout', compact('slotsParam', 'total', 'venueId'));
+        return view('user.checkout', compact('slotsParam', 'total', 'venueId', 'venue'));
     });
 
 });
@@ -256,8 +262,112 @@ Route::middleware('auth')->prefix('partner')->group(function () {
 });
 
 // ─────────────────────────────────────────────────────────────
-// STAFF
+// STAFF — acciones que persisten en BD
 // ─────────────────────────────────────────────────────────────
+
+// Check-in real: valida QR y actualiza booking + shift_movement
+Route::post('/staff/checkin', function () {
+    $token   = strtoupper(trim(request('qr_token', '')));
+    $user    = Auth::user();
+
+    $booking = Booking::where('qr_token', $token)
+        ->where('status', 'confirmed')
+        ->with(['field.venue', 'slots'])
+        ->first();
+
+    if (!$booking) {
+        return response()->json(['ok' => false, 'error' => 'QR no válido o reserva no confirmada'], 404);
+    }
+
+    // Registrar check-in
+    $booking->update([
+        'status'        => 'checked_in',
+        'checked_in_at' => now(),
+        'staff_id'      => $user->id,
+    ]);
+
+    // Registrar en shift_movement si hay turno abierto
+    $turno = \App\Models\ShiftLog::where('user_id', $user->id)
+        ->whereNull('closed_at')
+        ->latest('opened_at')
+        ->first();
+
+    if ($turno) {
+        \App\Models\ShiftMovement::create([
+            'shift_log_id' => $turno->id,
+            'booking_id'   => $booking->id,
+            'type'         => 'checkin',
+            'amount'       => (float) $booking->balance_due,
+            'description'  => 'Check-in via QR',
+        ]);
+    }
+
+    return response()->json([
+        'ok'      => true,
+        'cliente' => $booking->user?->name,
+        'cancha'  => $booking->field?->name,
+        'hora'    => $booking->timeRange,
+        'saldo'   => $booking->balance_due,
+    ]);
+})->middleware('auth');
+
+// Registrar presencial real
+Route::post('/staff/walkin', function () {
+    $user    = Auth::user();
+    $fieldId = request('field_id');
+    $hora    = request('hora', now()->format('H:00'));
+    $monto   = (float) request('monto', 70);
+    $nombre  = request('nombre', 'Presencial');
+
+    // Buscar slot disponible
+    $slot = \App\Models\Slot::where('field_id', $fieldId)
+        ->where('status', 'available')
+        ->whereDate('starts_at', today())
+        ->where('starts_at', today()->setTimeFromTimeString($hora))
+        ->first();
+
+    // Crear booking de presencial
+    $booking = Booking::create([
+        'user_id'        => $user->id,
+        'field_id'       => $fieldId,
+        'staff_id'       => $user->id,
+        'status'         => 'checked_in',
+        'total_price'    => $monto,
+        'deposit_amount' => $monto,
+        'balance_due'    => 0,
+        'platform_fee'   => 0,
+        'payment_status' => 'paid',
+        'payment_method' => 'efectivo',
+        'is_walkin'      => true,
+        'notes'          => $nombre,
+        'checked_in_at'  => now(),
+    ]);
+
+    if ($slot) {
+        $slot->update(['status' => 'reserved', 'booking_id' => $booking->id]);
+        \DB::table('booking_slots')->insert([
+            'booking_id' => $booking->id,
+            'slot_id'    => $slot->id,
+            'unit_price' => $monto,
+        ]);
+    }
+
+    // Registrar en turno abierto
+    $turno = \App\Models\ShiftLog::where('user_id', $user->id)
+        ->whereNull('closed_at')->latest('opened_at')->first();
+
+    if ($turno) {
+        \App\Models\ShiftMovement::create([
+            'shift_log_id' => $turno->id,
+            'booking_id'   => $booking->id,
+            'type'         => 'walkin',
+            'amount'       => $monto,
+            'description'  => "Presencial: $nombre",
+        ]);
+    }
+
+    return response()->json(['ok' => true, 'booking_id' => $booking->id]);
+})->middleware('auth');
 
 Route::get('/staff', function () {
     $user = Auth::user();
@@ -315,7 +425,7 @@ Route::middleware('auth')->prefix('admin')->group(function () {
         $partners = Venue::with(['owner', 'city', 'fields'])
             ->withCount('fields')
             ->orderBy('status')
-            ->get();
+            ->paginate(20);
         return view('admin.partners', compact('partners'));
     });
 
@@ -323,8 +433,7 @@ Route::middleware('auth')->prefix('admin')->group(function () {
     Route::get('/reservas',   function () {
         $reservas = Booking::with(['user', 'field.venue.city'])
             ->orderByDesc('created_at')
-            ->take(50)
-            ->get();
+            ->paginate(25);
         $stats = [
             'total_mes'   => Booking::whereMonth('created_at', now()->month)->count(),
             'completadas' => Booking::where('status','completed')->whereMonth('created_at', now()->month)->count(),

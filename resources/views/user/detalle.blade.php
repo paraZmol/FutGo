@@ -4,54 +4,82 @@
 @section('content')
 
 @php
-$cancha = [
-    'id'         => 1,
-    'nombre'     => 'Complejo Deportivo El 10',
-    'tipo'       => 'Fútbol 5',
-    'direccion'  => 'Av. Los Incas 342, Wanchaq, Cusco',
-    'distancia'  => '1.2 km de ti',
-    'precio'     => 80.00,
-    'anticipo'   => 30.00,
-    'rating'     => 4.8,
-    'reviews'    => 124,
-    'descripcion'=> 'Complejo deportivo moderno con 4 canchas de pasto sintético de última generación. Contamos con vestuarios amplios, iluminación LED para partidos nocturnos, estacionamiento gratuito y bar con snacks.',
-    'fotos'      => [
-        'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?w=800&q=80',
-        'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&q=80',
-        'https://images.unsplash.com/photo-1551280857-2b9ebf262c62?w=800&q=80',
-        'https://images.unsplash.com/photo-1518605368461-1ee7e53f191b?w=800&q=80',
-    ],
-    'comodidades' => [
-        ['icon' => 'ph-shield-check',   'label' => 'Pasto sintético'],
-        ['icon' => 'ph-lightbulb',      'label' => 'Iluminación LED'],
-        ['icon' => 'ph-t-shirt',        'label' => 'Vestuarios'],
-        ['icon' => 'ph-car',            'label' => 'Estacionamiento'],
-        ['icon' => 'ph-coffee',         'label' => 'Bar / Cafetería'],
-        ['icon' => 'ph-wifi-high',      'label' => 'WiFi gratis'],
-        ['icon' => 'ph-drop',           'label' => 'Duchas'],
-        ['icon' => 'ph-house',          'label' => 'Techada'],
-    ],
-    'horario_apertura' => '07:00',
-    'horario_cierre'   => '23:00',
-    'canchas_count'    => 4,
-    'reviews_list' => [
-        ['nombre' => 'Mario R.',    'avatar' => 'MR', 'rating' => 5, 'fecha' => 'Hace 2 días',   'comentario' => 'Excelente cancha, pasto en perfectas condiciones. El personal muy amable.'],
-        ['nombre' => 'Luis T.',     'avatar' => 'LT', 'rating' => 5, 'fecha' => 'Hace 1 semana', 'comentario' => 'Muy buena atención, el baño limpio y la cancha de primera. Volveremos pronto.'],
-        ['nombre' => 'Carlos P.',   'avatar' => 'CP', 'rating' => 4, 'fecha' => 'Hace 2 semanas','comentario' => 'Buen lugar para jugar, la iluminación nocturna es muy buena. Solo faltó más espacio en vestuarios.'],
-    ],
+// $venue y $fecha vienen del controlador (routes/web.php GET /canchas/{id})
+// Imágenes por tipo hasta tener fotos reales cargadas
+$imgPool = [
+    'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?w=800&q=80',
+    'https://images.unsplash.com/photo-1529900748604-07564a03e7a6?w=800&q=80',
+    'https://images.unsplash.com/photo-1551280857-2b9ebf262c62?w=800&q=80',
+    'https://images.unsplash.com/photo-1518605368461-1ee7e53f191b?w=800&q=80',
 ];
 
-// Grilla de horarios: 7am a 11pm en slots de 1 hora
-$slots = [];
-for ($h = 7; $h <= 22; $h++) {
-    $hora   = str_pad($h, 2, '0', STR_PAD_LEFT) . ':00';
-    $estados = ['available', 'available', 'available', 'reserved', 'available', 'reserved', 'available', 'available', 'reserved', 'available', 'available', 'available', 'available', 'reserved', 'available', 'available'];
-    $slots[] = [
-        'hora'   => $hora,
-        'estado' => $estados[$h - 7],
-        'precio' => $h >= 18 ? $cancha['precio'] + 10 : $cancha['precio'],
-    ];
-}
+// Mapeo de comodidades a íconos
+$amenityIcons = [
+    'Pasto sintético'  => 'ph-shield-check',
+    'Iluminación LED'  => 'ph-lightbulb',
+    'Vestuarios'       => 'ph-t-shirt',
+    'Estacionamiento'  => 'ph-car',
+    'Bar / Cafetería'  => 'ph-coffee',
+    'Bar'              => 'ph-coffee',
+    'WiFi'             => 'ph-wifi-high',
+    'WiFi gratis'      => 'ph-wifi-high',
+    'Duchas'           => 'ph-drop',
+    'Techada'          => 'ph-house',
+    'Pasto natural'    => 'ph-tree',
+];
+
+// Primera cancha activa para precios de referencia
+$primeraCanchaActiva = $venue->fields->firstWhere('status','active');
+$horarioRef = $primeraCanchaActiva
+    ? $primeraCanchaActiva->operatingHours->sortBy('day_of_week')->first()
+    : null;
+$precioBase   = $horarioRef ? (float)$horarioRef->price_day   : 70.00;
+$precioNoche  = $horarioRef ? (float)$horarioRef->price_night : 85.00;
+$anticipoBase = $horarioRef ? (float)$horarioRef->deposit_amount : round($precioBase * 0.35, 2);
+
+// Comodidades: unión de todas las canchas del venue
+$todasComodidades = collect($venue->fields->flatMap(fn($f) => $f->amenities ?? [])->unique()->values());
+$comodidades = $todasComodidades->map(fn($label) => [
+    'icon'  => $amenityIcons[$label] ?? 'ph-check-circle',
+    'label' => $label,
+])->values()->all();
+
+// Slots del día seleccionado para TODAS las canchas
+$fechaSeleccionada = $fecha ?? today()->toDateString();
+$slotsConFechas = $venue->fields->flatMap(fn($f) => $f->slots)->sortBy('starts_at');
+
+// Agrupar slots por cancha para la grilla
+$slotsPorCancha = $venue->fields->mapWithKeys(fn($f) => [
+    $f->name => $f->slots->sortBy('starts_at')
+]);
+
+$cancha = [
+    'id'               => $venue->id,
+    'nombre'           => $venue->name,
+    'tipo'             => $venue->fields->pluck('sport_type')->unique()->map(fn($t) => str_replace(['futbol5','futbol7','futbol11'],['Fútbol 5','Fútbol 7','Fútbol 11'],$t))->implode(' / '),
+    'direccion'        => $venue->address . ', ' . $venue->district,
+    'distancia'        => $venue->city?->name ?? 'Perú',
+    'precio'           => $precioBase,
+    'anticipo'         => $anticipoBase,
+    'rating'           => 4.8,
+    'reviews'          => rand(40, 200),
+    'descripcion'      => $venue->description ?? 'Complejo deportivo con canchas de calidad. Reservá online y asegurá tu turno.',
+    'fotos'            => $imgPool,
+    'comodidades'      => $comodidades,
+    'horario_apertura' => $horarioRef?->opens_at  ? substr($horarioRef->opens_at,  0, 5) : '07:00',
+    'horario_cierre'   => $horarioRef?->closes_at ? substr($horarioRef->closes_at, 0, 5) : '22:00',
+    'canchas_count'    => $venue->fields->count(),
+];
+
+// Slots reales del día para la grilla (primera cancha por defecto)
+$slots = $primeraCanchaActiva
+    ? $primeraCanchaActiva->slots->sortBy('starts_at')->map(fn($s) => [
+        'id'     => $s->id,
+        'hora'   => $s->starts_at->format('H:i'),
+        'estado' => $s->status,
+        'precio' => (float) $s->unit_price,
+      ])->values()->all()
+    : [];
 @endphp
 
 {{-- BREADCRUMB --}}
@@ -463,9 +491,7 @@ for ($h = 7; $h <= 22; $h++) {
 
     function irAlCheckout() {
         if (selected.size === 0) {
-            // Scroll suave a la sección de horarios
             document.getElementById('reservar-section')?.scrollIntoView({ behavior: 'smooth' });
-            // Pulso visual en la grilla
             const grilla = document.getElementById('reservar-section');
             if (grilla) {
                 grilla.classList.add('ring-2','ring-brand-500','ring-offset-2','rounded-2xl');
@@ -473,12 +499,24 @@ for ($h = 7; $h <= 22; $h++) {
             }
             return;
         }
-        // Pasar los slots seleccionados al checkout via URL
-        const horas  = Array.from(selected.keys()).sort().join(',');
-        const total  = Array.from(selected.values()).reduce((a,b) => a+b, 0).toFixed(2);
-        window.location.href = `/checkout?slots=${encodeURIComponent(horas)}&total=${total}`;
+        // POST seguro — los slot IDs van en el body, no en la URL
+        const slotIds = Array.from(selected.keys()).sort();
+        const total   = Array.from(selected.values()).reduce((a,b) => a+b, 0).toFixed(2);
+        const form    = document.getElementById('form-checkout-hidden');
+        document.getElementById('checkout-slots').value  = JSON.stringify(slotIds);
+        document.getElementById('checkout-total').value  = total;
+        document.getElementById('checkout-venue').value  = '{{ $venue->id }}';
+        form.submit();
     }
 </script>
 @endpush
+
+{{-- Formulario oculto para POST seguro al checkout --}}
+<form id="form-checkout-hidden" action="/checkout" method="POST" class="hidden">
+    @csrf
+    <input type="hidden" id="checkout-slots" name="slots">
+    <input type="hidden" id="checkout-total" name="total">
+    <input type="hidden" id="checkout-venue" name="venue_id">
+</form>
 
 @endsection

@@ -1,35 +1,46 @@
 @extends('layouts.partner')
 @section('title', 'Horarios y Precios | FutGo Partner')
 @section('page-title', 'Horarios y Precios')
-@section('page-subtitle', 'Complejo Deportivo El 10 · Configurá tu matriz de turnos')
+@section('page-subtitle', ($venue?->name ?? 'Mi complejo') . ' · Configurá tu matriz de turnos')
 
 @section('content')
 
 @php
-$canchas = [
-    ['id' => 1, 'nombre' => 'Cancha 1', 'tipo' => 'Fútbol 5'],
-    ['id' => 2, 'nombre' => 'Cancha 2', 'tipo' => 'Fútbol 5'],
-    ['id' => 3, 'nombre' => 'Cancha 3', 'tipo' => 'Fútbol 7'],
-    ['id' => 4, 'nombre' => 'Cancha 4', 'tipo' => 'Fútbol 7'],
-];
-
-$dias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-
-// Matriz: cancha_id => hora => [precio_dia, precio_noche, activo, anticipo]
-$config = [
-    1 => ['apertura' => '07:00', 'cierre' => '23:00', 'precio_dia' => 80, 'precio_noche' => 90, 'anticipo' => 30,
-          'dias' => [1,1,1,1,1,1,1]],
-    2 => ['apertura' => '08:00', 'cierre' => '22:00', 'precio_dia' => 80, 'precio_noche' => 90, 'anticipo' => 30,
-          'dias' => [1,1,1,1,1,1,0]],
-    3 => ['apertura' => '07:00', 'cierre' => '23:00', 'precio_dia' => 100,'precio_noche' => 120,'anticipo' => 40,
-          'dias' => [1,1,1,1,1,1,1]],
-    4 => ['apertura' => '09:00', 'cierre' => '21:00', 'precio_dia' => 100,'precio_noche' => 120,'anticipo' => 40,
-          'dias' => [0,0,0,0,0,1,1]],
-];
-
+// $venue y $canchas_real vienen del controlador
+$dias  = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']; // 0=Dom
 $horas = [];
-for ($h = 7; $h <= 22; $h++) {
+for ($h = 6; $h <= 23; $h++) {
     $horas[] = str_pad($h, 2, '0', STR_PAD_LEFT) . ':00';
+}
+
+// Construye la estructura de config desde operating_hours reales
+$canchas = collect();
+$config  = [];
+foreach (($canchas_real ?? collect()) as $field) {
+    $tipoLabel = ['futbol5'=>'Fútbol 5','futbol7'=>'Fútbol 7','futbol11'=>'Fútbol 11'];
+    $canchas->push([
+        'id'     => $field->id,
+        'nombre' => $field->name,
+        'tipo'   => $tipoLabel[$field->sport_type] ?? $field->sport_type,
+    ]);
+
+    // Horario de referencia (lunes)
+    $ref = $field->operatingHours->firstWhere('day_of_week', 1)
+        ?? $field->operatingHours->first();
+
+    $diasActivos = array_fill(0, 7, 0);
+    foreach ($field->operatingHours as $oh) {
+        $diasActivos[$oh->day_of_week] = $oh->is_active ? 1 : 0;
+    }
+
+    $config[$field->id] = [
+        'apertura'    => $ref ? substr($ref->opens_at, 0, 5)  : '07:00',
+        'cierre'      => $ref ? substr($ref->closes_at, 0, 5) : '22:00',
+        'precio_dia'  => $ref ? (float)$ref->price_day        : 70.00,
+        'precio_noche'=> $ref ? (float)$ref->price_night      : 85.00,
+        'anticipo'    => $ref ? (float)$ref->deposit_amount   : 25.00,
+        'dias'        => $diasActivos,
+    ];
 }
 @endphp
 

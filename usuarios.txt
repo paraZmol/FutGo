@@ -1,0 +1,4 @@
+Admin	    admin@futgo.app	        password
+Partner	    juan.quispe@gmail.com	password
+Staff	    pedro.staff@futgo.app	password
+Jugador	    mario.quispe@gmail.com	password

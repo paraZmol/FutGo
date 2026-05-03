@@ -2,6 +2,15 @@
 
 ![FutGo Banner](futgo_readme_banner_1777823008034.png)
 
+<p align="center">
+    <img src="https://img.shields.io/badge/Laravel-11-FF2D20?style=for-the-badge&logo=laravel" alt="Laravel 11">
+    <img src="https://img.shields.io/badge/PHP-8.2-777BB4?style=for-the-badge&logo=php" alt="PHP 8.2">
+    <img src="https://img.shields.io/badge/Tailwind_CSS-3.0-38B2AC?style=for-the-badge&logo=tailwind-css" alt="Tailwind CSS 3.0">
+    <img src="https://img.shields.io/badge/License-MIT-A6BC21?style=for-the-badge" alt="License MIT">
+</p>
+
+---
+
 ## 🌟 Visión y Problemática
 ### El Problema
 La gestión de complejos deportivos en entornos urbanos sufre de una fragmentación crítica:

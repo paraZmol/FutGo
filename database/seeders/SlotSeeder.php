@@ -14,8 +14,8 @@ class SlotSeeder extends Seeder
         $fields = Field::with('operatingHours')->get();
         $today  = Carbon::today();
 
-        // Genera slots: 7 días pasados + hoy + 7 días futuros
-        for ($dayOffset = -7; $dayOffset < 7; $dayOffset++) {
+        // Genera slots: 7 días pasados + hoy + 30 días futuros (ventana del documento)
+        for ($dayOffset = -7; $dayOffset < 30; $dayOffset++) {
             $date      = $today->copy()->addDays($dayOffset);
             $dayOfWeek = (int) $date->dayOfWeek; // 0=domingo
 

@@ -1,294 +1,113 @@
-# Plan de Base de Datos — FutGo (Simulación)
+# Plan de Base de Datos — FutGo (Simulación v2)
 
-**Estado general:** Pendiente de inicio  
+**Estado general:** ✅ 16/16 tablas implementadas — BD COMPLETA  
 **Motor actual:** SQLite (desarrollo local)  
-**Motor futuro:** MySQL 8 (producción — ese es otro plan, ver Documento Arquitectónico Maestro v2.0)
+**Motor futuro:** MySQL 8 (producción)  
+**Referencia:** Documento Arquitectónico Maestro v2.0
 
 ---
 
 ## Por qué esta BD es DIFERENTE a la del documento
 
-El documento arquitectónico define una BD de producción que requiere:
-- MySQL 8 con columnas POINT + índice SPATIAL (geoespacial)
-- Redis para locks distribuidos (anti-colisión de slots)
-- Webhooks firmados con HMAC-SHA256 (pasarela de pago real)
-- Workers con Laravel Horizon para colas
-
-**Esta BD de simulación simplifica todo eso** para que las vistas Blade funcionen con datos reales sin infraestructura compleja. Cuando se migre a producción se reemplaza por el esquema del documento.
-
----
-
-## Simplificaciones aplicadas
-
-| Concepto del documento | Cómo se simplifica aquí |
+| Concepto del documento | Cómo se simplifica en simulación |
 |---|---|
-| Columna POINT geoespacial | `latitude` y `longitude` DECIMAL simples |
-| Redis lock distribuido | Solo campo `status` en `slots` con transacción MySQL |
-| Webhook HMAC-SHA256 | Campo `payment_status` directo en `bookings` |
-| Idempotency keys | No se implementa en simulación |
-| Workers y colas (Horizon) | No aplica — todo es síncrono |
+| Columna `POINT` geoespacial | `latitude` y `longitude` DECIMAL simples |
+| Redis lock distribuido | Campo `status` + `lock_expires_at` en `slots` |
+| Webhook HMAC-SHA256 | `payment_status` directo en `bookings` |
+| `idempotency_key` | No implementado en simulación |
+| Workers y Horizon | Todo síncrono |
+| `platform_fee` en bookings | No implementado (Fase 1 = 0%) |
 
 ## Reglas que SÍ se respetan
 
-- Montos siempre `DECIMAL(10,2)` — nunca float
+- Montos siempre `DECIMAL(10,2)` — NUNCA float
 - Timestamps en UTC
-- Máquina de estados del slot: `available | pending_payment | reserved | completed | expired`
-- Un slot solo puede pertenecer a un booking
-- Precios en bookings son snapshot al momento de reservar
-- `audit_logs` solo tiene `created_at` (sin `updated_at`)
+- Máquina de estados del slot: `available | pending_payment | reserved | event_occupied | completed | expired`
+- Un slot solo puede pertenecer a un booking (`slot_id UNIQUE` en booking_slots)
+- Precios en bookings son **snapshot inmutable** al momento de reservar
+- `audit_logs` solo tiene `created_at` (sin `updated_at` — inmutable por diseño)
+- Ningún partner puede ver venues ajenos (validado en rutas con `venues()->where('id',...)`)
 
 ---
 
 ## Estado de avance
 
-| # | Fase | Tabla | Estado |
-|---|------|-------|--------|
-| 1 | Usuarios | users | ✅ Listo |
-| 2 | Usuarios | password_reset_tokens | ✅ Listo |
-| 3 | Ciudades | cities | ✅ Listo |
-| 4 | Complejos | venues | ✅ Listo |
-| 5 | Complejos | venue_staff | ✅ Listo |
-| 6 | Complejos | fields | ✅ Listo |
-| 7 | Inventario | operating_hours | ✅ Listo |
-| 8 | Inventario | slots | ✅ Listo |
-| 9 | Inventario | events | ✅ Listo |
-| 10 | Reservas | bookings | ✅ Listo |
-| 11 | Reservas | booking_slots | ✅ Listo |
-| 12 | Reservas | transactions | ✅ Listo |
-| 13 | Staff | shift_logs | ⬜ Pendiente |
-| 14 | Staff | shift_movements | ⬜ Pendiente |
-| 15 | Auditoría | audit_logs | ⬜ Pendiente |
-| 16 | Auditoría | notifications_log | ⬜ Pendiente |
-
-**Total: 16 tablas en 6 fases**
-
-**Total: 15 tablas en 6 fases**
+| # | Fase | Tabla | Estado | Notas |
+|---|------|-------|--------|-------|
+| 1 | Usuarios | users | ✅ Listo | role, phone, avatar_url, city_id |
+| 2 | Usuarios | password_reset_tokens | ✅ Listo | Laravel nativo |
+| 3 | Ciudades | cities | ✅ Listo | is_active, lat/lng |
+| 4 | Complejos | venues | ✅ Listo | city_id FK, status pending/active/suspended |
+| 5 | Complejos | venue_staff | ✅ Listo | UNIQUE(venue_id, user_id) |
+| 6 | Complejos | fields | ✅ Listo | sport_type, surface, amenities JSON |
+| 7 | Inventario | operating_hours | ✅ Listo | price_day/night diferenciados |
+| 8 | Inventario | slots | ✅ Listo | máquina de estados, lock_expires_at |
+| 9 | Inventario | events | ✅ Listo | torneo/mantenimiento/evento_privado |
+| 10 | Reservas | bookings | ✅ Listo | qr_token, snapshot precios |
+| 11 | Reservas | booking_slots | ✅ Listo | unit_price snapshot, slot_id UNIQUE |
+| 12 | Reservas | transactions | ✅ Listo | deposit/balance/refund/walkin |
+| 13 | Staff | shift_logs | ✅ Listo | turno con apertura/cierre de caja |
+| 14 | Staff | shift_movements | ✅ Listo | checkin/walkin/noshow por turno |
+| 15 | Auditoría | audit_logs | ✅ Listo | append-only, inmutable |
+| 16 | Auditoría | notifications_log | ✅ Listo | email/push/whatsapp |
 
 ---
 
-## FASE 1 — Usuarios
+## Falencias detectadas vs. el documento
 
-### 1. `users` ⬜
-```
-id                  bigint PK autoincrement
-name                string
-email               string unique
-password            string (hashed)
-role                enum: user | partner | staff | admin   default: user
-phone               string nullable
-avatar_url          string nullable
-email_verified_at   timestamp nullable
-remember_token      string nullable
-created_at / updated_at
-```
-**Nota:** Agregar `city_id FK → cities nullable` a esta tabla cuando se cree la migración de cities (Fase 2).  
-**Seeders:** 1 admin, 2 moderadores, 5 partners, 3 staff, 20 jugadores con nombres peruanos y ciudades asignadas.
+### ❌ Faltantes críticos
 
----
+1. **`shift_logs` y `shift_movements`** — El staff no tiene turno registrado en BD. La PWA muestra datos hardcodeados.
+2. **`audit_logs`** — Las acciones del admin (aprobar partner, resolver disputa) no se registran. El documento exige bitácora inmutable.
+3. **`notifications_log`** — No hay registro de notificaciones enviadas.
+4. **`platform_fee` en bookings** — El documento exige que el campo exista desde el día 1 aunque valga 0. Permite activar monetización sin reescritura.
+5. **`venue.phone` falta en algunos modelos** — ya existe en la migración pero falta en el fillable de Venue.
 
-### 2. `password_reset_tokens` ⬜
-```
-email       string PK
-token       string
-created_at  timestamp
-```
+### ⚠️ Inconsistencias menores
 
----
+6. **`users.city_id`** — FK creada en migración pero el seeder no asigna ciudades a los jugadores.
+7. **`venues.cover_image`** — Campo existe pero siempre null; las vistas usan imágenes de Unsplash hardcodeadas.
+8. **`bookings.is_walkin`** — Existe pero las reservas presenciales del staff no crean bookings reales.
+9. **`slots` solo 14 días** — El documento exige ventana de 30 días. Actualmente generamos ±7 días.
+10. **`operating_hours` no se leen en el detalle de cancha** — La vista usa los slots reales pero el formulario de horarios del partner sigue hardcodeado.
 
-## FASE 2 — Ciudades
+### ✅ Bien implementado
 
-### 3. `cities` ⬜
-Ciudades donde opera FutGo. Centraliza la cobertura y permite filtrar canchas y eventos por ciudad. El jugador elige su ciudad al registrarse o en el buscador; si cambia de ciudad lo decide él (GPS o búsqueda manual).
-
-**Lógica:**
-- FutGo decide qué ciudades activa (`is_active`)
-- `venues` tiene FK a `cities` — un complejo pertenece a una ciudad
-- `users` tiene FK nullable a `cities` — la ciudad preferida del jugador
-- El home pre-filtra canchas y eventos según `city_id` del usuario logueado o de la cookie de ciudad seleccionada
-
-```
-id           bigint PK autoincrement
-name         string           (Huaraz, Cusco, Lima...)
-department   string           (Áncash, Cusco, Lima...)
-slug         string unique    (huaraz, cusco, lima)
-latitude     DECIMAL(10,8)    (centro de la ciudad)
-longitude    DECIMAL(11,8)
-is_active    boolean default false   (solo Admin activa ciudades)
-created_at / updated_at
-```
-
-**Seeders:** Huaraz (activa), Cusco (activa), Lima (activa), Arequipa (activa), Trujillo (activa). Más ciudades con `is_active = false` para cuando expanda.
-
-**También agregar a `users`:**
-- `city_id` FK → cities nullable (ciudad preferida del jugador)
+- Roles y autenticación (`role` en users, middleware auth)
+- Relación partner ↔ venues (multi-venue con selector de activo)
+- Relación staff ↔ venue (venue_staff)
+- Slots con máquina de estados
+- Bookings con snapshots de precio
+- Transacciones separadas por tipo
+- Ciudades con `is_active`
+- Todas las rutas protegidas con `auth` middleware
 
 ---
 
-## FASE 3 — Complejos y canchas
+## FASE 5 — Staff (PENDIENTE)
 
-### 4. `venues` ⬜
-```
-id              bigint PK
-user_id         FK → users (partner dueño)
-city_id         FK → cities
-name            string
-slug            string unique
-description     text nullable
-address         string
-district        string
-latitude        DECIMAL(10,8)
-longitude       DECIMAL(11,8)
-status          enum: pending | active | suspended   default: pending
-cover_image     string nullable
-created_at / updated_at
-```
-**Seeders:** 5 complejos distribuidos en Huaraz, Cusco y Lima con coordenadas reales.
+### 13. `shift_logs` ⬜
+Registro de cada turno del staff. El documento exige cuadre de caja auditable.
 
----
-
-### 4. `venue_staff` ⬜
-```
-id          bigint PK
-venue_id    FK → venues
-user_id     FK → users (role=staff)
-active      boolean default true
-created_at / updated_at
-UNIQUE(venue_id, user_id)
-```
-
----
-
-### 5. `fields` ⬜
-```
-id          bigint PK
-venue_id    FK → venues
-name        string (Cancha 1, Cancha 2...)
-sport_type  enum: futbol5 | futbol7 | futbol11
-surface     enum: sintetico | natural
-is_covered  boolean default false
-amenities   JSON nullable
-status      enum: active | maintenance   default: active
-created_at / updated_at
-```
-**Seeders:** 2-4 canchas por venue con variedad de tipos.
-
----
-
-## FASE 3 — Inventario de tiempo
-
-### 6. `operating_hours` ⬜
-```
-id              bigint PK
-field_id        FK → fields
-day_of_week     tinyint 0-6 (0=domingo)
-opens_at        time
-closes_at       time
-price_day       DECIMAL(10,2)
-price_night     DECIMAL(10,2)
-deposit_amount  DECIMAL(10,2)
-is_active       boolean default true
-created_at / updated_at
-UNIQUE(field_id, day_of_week)
-```
-
----
-
-### 7. `slots` ⬜
-```
-id              bigint PK
-field_id        FK → fields
-booking_id      FK → bookings nullable
-starts_at       datetime UTC
-ends_at         datetime UTC
-status          enum: available | pending_payment | reserved | event_occupied | completed | expired
-unit_price      DECIMAL(10,2)
-lock_expires_at datetime nullable
-created_at / updated_at
-INDEX(field_id, starts_at)
-INDEX(status)
-```
-**Seeders:** Command `slots:seed` — genera slots 30 días adelante, algunos ya reservados.
-
----
-
-### 8. `events` ⬜
-```
-id          bigint PK
-venue_id    FK → venues
-field_id    FK → fields nullable
-title       string
-type        enum: torneo | mantenimiento | evento_privado | otro
-starts_at   datetime UTC
-ends_at     datetime UTC
-created_by  FK → users
-created_at / updated_at
-```
-
----
-
-## FASE 4 — Reservas y pagos
-
-### 9. `bookings` ⬜
-```
-id              bigint PK
-user_id         FK → users
-field_id        FK → fields
-qr_token        string unique (UUID)
-status          enum: pending | confirmed | checked_in | no_show | cancelled | completed
-total_price     DECIMAL(10,2) snapshot
-deposit_amount  DECIMAL(10,2) snapshot
-balance_due     DECIMAL(10,2) snapshot
-payment_status  enum: unpaid | paid | refunded   default: unpaid
-payment_method  enum: yape | plin | tarjeta | efectivo nullable
-is_walkin       boolean default false
-notes           text nullable
-created_at / updated_at
-```
-
----
-
-### 10. `booking_slots` ⬜
-```
-id          bigint PK
-booking_id  FK → bookings
-slot_id     FK → slots UNIQUE
-unit_price  DECIMAL(10,2) snapshot
-```
-
----
-
-### 11. `transactions` ⬜
-```
-id              bigint PK
-booking_id      FK → bookings
-amount          DECIMAL(10,2)
-type            enum: deposit | balance | refund | walkin
-payment_method  enum: yape | plin | tarjeta | efectivo
-status          enum: pending | approved | rejected | refunded
-notes           string nullable
-created_at / updated_at
-```
-
----
-
-## FASE 5 — Operación del Staff
-
-### 12. `shift_logs` ⬜
 ```
 id              bigint PK
 venue_id        FK → venues
 user_id         FK → users (staff)
 opened_at       datetime UTC
 closed_at       datetime nullable UTC
-expected_cash   DECIMAL(10,2) nullable
-delivered_cash  DECIMAL(10,2) nullable
+expected_cash   DECIMAL(10,2) nullable  ← calculado al cerrar
+delivered_cash  DECIMAL(10,2) nullable  ← lo que entrega el staff
 notes           text nullable
 created_at / updated_at
 ```
 
+**Seeders:** 1 turno abierto hoy (Pedro Mamani, Canchas Yungay) + 5 turnos cerrados de días anteriores con sus montos.
+
 ---
 
-### 13. `shift_movements` ⬜
+### 14. `shift_movements` ⬜
+Movimientos de caja dentro de un turno. Cada check-in, presencial y no-show queda registrado.
+
 ```
 id              bigint PK
 shift_log_id    FK → shift_logs
@@ -296,33 +115,39 @@ booking_id      FK → bookings nullable
 type            enum: checkin | walkin | noshow_retention | manual
 amount          DECIMAL(10,2)
 description     string nullable
-created_at
+created_at      (sin updated_at — registro histórico)
 ```
 
 ---
 
-## FASE 6 — Auditoría y notificaciones
+## FASE 6 — Auditoría y notificaciones (PENDIENTE)
 
-### 14. `audit_logs` ⬜
+### 15. `audit_logs` ⬜
+Bitácora inmutable de acciones críticas. El documento dice: **nadie, incluido el admin, puede borrar registros financieros.**
+
 ```
 id              bigint PK
-user_id         FK → users nullable
-action          string
-target_type     string nullable
+user_id         FK → users nullable  ← quién hizo la acción
+action          string               ← PARTNER_APROBADO, BOOKING_REVERTIDO, etc.
+target_type     string nullable       ← App\Models\Venue
 target_id       bigint nullable
-payload         JSON nullable
+payload         JSON nullable         ← estado antes y después
 ip_address      string nullable
-created_at      (sin updated_at — inmutable)
+created_at      (sin updated_at — INMUTABLE)
 ```
+
+**Seeders:** Logs de las acciones del seeder (partners aprobados, bookings creados).
 
 ---
 
-### 15. `notifications_log` ⬜
+### 16. `notifications_log` ⬜
+Registro de todas las notificaciones enviadas. Permite auditar y reenviar.
+
 ```
 id          bigint PK
 user_id     FK → users
 channel     enum: email | push | whatsapp
-type        string
+type        string   ← booking_confirmed, checkin_reminder, noshow_alert
 payload     JSON
 status      enum: pending | sent | failed
 sent_at     datetime nullable
@@ -331,11 +156,45 @@ created_at
 
 ---
 
+## Campos faltantes a agregar en tablas existentes
+
+### `bookings` — agregar `platform_fee`
+```sql
+ALTER TABLE bookings ADD COLUMN platform_fee DECIMAL(10,2) DEFAULT 0.00;
+```
+El documento exige que exista desde el día 1 aunque sea 0. Cuando se active la Fase 3 de monetización, se llena con el % correspondiente sin cambiar el esquema.
+
+### `venues` — agregar `cover_image` (ya existe) y `rating_avg`
+```sql
+ALTER TABLE venues ADD COLUMN rating_avg DECIMAL(3,2) DEFAULT 0.00;
+ALTER TABLE venues ADD COLUMN rating_count int DEFAULT 0;
+```
+Para cuando se implemente el sistema de calificaciones del documento (RF de ratings).
+
+---
+
 ## Notas para migración a MySQL (producción)
 
-- Agregar columna `POINT location` en `venues` con índice SPATIAL
-- Agregar `idempotency_key` en `bookings` y `transactions`
-- Agregar tabla `webhook_events` con firma HMAC
-- Configurar Redis para locks de slots
-- Implementar Laravel Horizon para colas
-- Ver Documento Arquitectónico Maestro v2.0 Sección 9
+1. Cambiar `latitude`/`longitude` DECIMAL por columna `POINT location` con índice `SPATIAL`
+2. Agregar `idempotency_key` en `bookings` y `transactions`
+3. Agregar tabla `webhook_events` (firma HMAC-SHA256 de la pasarela)
+4. Cambiar `SESSION_DRIVER` a Redis
+5. Configurar Redis para locks de slots (TTL 600s)
+6. Implementar Laravel Horizon para colas por prioridad: critical > default > notifications > low
+7. Activar `platform_fee` con el motor de comisiones
+8. Ver Documento Arquitectónico Maestro v2.0 Sección 9 para el esquema completo
+
+---
+
+## Credenciales de prueba
+
+| Rol | Email | Password |
+|-----|-------|----------|
+| Admin | admin@futgo.app | password |
+| Partner (2 venues Huaraz) | juan.quispe@gmail.com | password |
+| Partner (El 10, Cusco) | maria.lopez@gmail.com | password |
+| Staff | pedro.staff@futgo.app | password |
+| Jugador (con reservas) | mario.quispe@gmail.com | password |
+| Jugador (con reservas) | luis.torres@gmail.com | password |
+
+**How to apply:** Al iniciar sesión de trabajo en BD, consultar este archivo, identificar qué tabla sigue en la tabla de avance y ejecutar `php artisan migrate:fresh --seed` después de cada fase completada.

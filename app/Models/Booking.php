@@ -9,7 +9,7 @@ class Booking extends Model
 {
     protected $fillable = [
         'user_id', 'field_id', 'qr_token', 'status',
-        'total_price', 'deposit_amount', 'balance_due',
+        'total_price', 'deposit_amount', 'balance_due', 'platform_fee',
         'payment_status', 'payment_method', 'is_walkin', 'notes',
     ];
 
@@ -17,6 +17,7 @@ class Booking extends Model
         'total_price'    => 'decimal:2',
         'deposit_amount' => 'decimal:2',
         'balance_due'    => 'decimal:2',
+        'platform_fee'   => 'decimal:2',
         'is_walkin'      => 'boolean',
     ];
 

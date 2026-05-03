@@ -41,8 +41,9 @@ class User extends Authenticatable
     public function isUser(): bool    { return $this->role === 'user'; }
 
     // Relaciones (se completan en fases posteriores)
-    public function venues()       { return $this->hasMany(Venue::class); }
-    public function bookings()     { return $this->hasMany(Booking::class); }
-    public function shiftLogs()    { return $this->hasMany(ShiftLog::class); }
-    public function auditLogs()    { return $this->hasMany(AuditLog::class); }
+    public function venues()           { return $this->hasMany(Venue::class); }
+    public function bookings()         { return $this->hasMany(Booking::class); }
+    public function shiftLogs()        { return $this->hasMany(ShiftLog::class); }
+    public function auditLogs()        { return $this->hasMany(AuditLog::class); }
+    public function notificationLogs() { return $this->hasMany(NotificationLog::class); }
 }

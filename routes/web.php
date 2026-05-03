@@ -430,6 +430,46 @@ Route::middleware('auth')->prefix('admin')->group(function () {
     });
 
     Route::get('/usuarios',   fn() => view('admin.usuarios'));
+
+    // Marca — solo Super Admin (no moderadores)
+    Route::get('/marca', function () {
+        // Solo el usuario con email @futgo.app y role admin puede acceder
+        if (Auth::user()->role !== 'admin' || !str_ends_with(Auth::user()->email, '@futgo.app')) {
+            abort(403);
+        }
+        $settings = \App\Models\SiteSetting::pluck('value', 'key')->toArray();
+        return view('admin.marca', compact('settings'));
+    });
+
+    Route::post('/marca', function () {
+        if (Auth::user()->role !== 'admin' || !str_ends_with(Auth::user()->email, '@futgo.app')) {
+            abort(403);
+        }
+
+        $campos = ['site_name', 'site_tagline', 'site_color', 'site_email', 'site_phone', 'site_country', 'site_currency'];
+        foreach ($campos as $campo) {
+            if (request()->has($campo)) {
+                \App\Models\SiteSetting::set($campo, request($campo));
+            }
+        }
+
+        // Subida de imágenes
+        foreach (['site_logo', 'site_logo_dark', 'site_favicon'] as $imgField) {
+            if (request()->hasFile($imgField)) {
+                $file = request()->file($imgField);
+                $path = $file->store("brand", 'public');
+                \App\Models\SiteSetting::set($imgField, '/storage/' . $path);
+            }
+        }
+
+        // Registrar en audit_log
+        \App\Models\AuditLog::record('MARCA_ACTUALIZADA', null, [
+            'campos' => $campos,
+            'tiene_logo' => request()->hasFile('site_logo'),
+        ]);
+
+        return redirect('/admin/marca')->with('success', 'Configuración de marca guardada correctamente.');
+    });
     Route::get('/reservas',   function () {
         $reservas = Booking::with(['user', 'field.venue.city'])
             ->orderByDesc('created_at')

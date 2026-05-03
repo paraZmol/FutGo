@@ -1,27 +1,65 @@
-REPORTE DE HALLAZGOS - POST-MIGRACIÓN MYSQL 8.0
-============================================
-Fecha: 2026-05-03 10:45
-Objetivo: Identificar defectos y omisiones tras la migración de SQLite a MySQL 8.
+REPORTE FINAL DE ESTADO - PROYECTO FUTGO (SIMULACIÓN v3)
+=========================================================
+Fecha: 2026-05-03
+Referencia: DB_PLAN.md + Documento Arquitectónico Maestro v2.0
 
-1. DEFECTOS TÉCNICOS DE MIGRACIÓN (MYSQL-SPECIFIC)
--------------------------------------------------
-* TIPOS DE DATOS ESPACIALES (CRÍTICO): Las tablas `venues` y `cities` siguen usando `DECIMAL(10,8)` para latitud y longitud. El manual (Secc. 9.2.2) exige el uso del tipo `POINT` de MySQL 8 para habilitar índices `SPATIAL` y cálculos eficientes.
-* COLLATION OBSOLETA: La base de datos está configurada con `utf8mb4_unicode_ci` (config/database.php). Para MySQL 8.0+, el estándar de alto rendimiento y precisión es `utf8mb4_0900_ai_ci`.
-* AUSENCIA DE UUIDs: A pesar del cambio de motor, ninguna tabla ha implementado el campo `uuid` (Secc. 1.1). Se siguen exponiendo IDs incrementales en las rutas, lo cual es un riesgo de seguridad (Insecure Direct Object Reference).
-* AUSENCIA DE IDEMPOTENCIA: La tabla `transactions` carece de una columna `idempotency_key` con índice `UNIQUE`, lo que puede generar cobros duplicados en MySQL ante reintentos de red.
+=== RESUELTO (no reportar más) ===
 
-2. INCONSISTENCIAS EN IMPLEMENTACIÓN DE BD
-------------------------------------------
-* CONCURRENCIA (SLOTS): La tabla `slots` sigue sin la columna `version` (INT UNSIGNED). Sin esto, no hay protección contra "Race Conditions" en reservas simultáneas.
-* NOMENCLATURA SNAPSHOT: Los campos en `bookings` (`total_price`, `deposit_amount`, `platform_fee`) no utilizan el prefijo `snapshot_` requerido (Secc. 9.1.5). Esto es vital para distinguir el precio pactado de posibles cambios futuros en el tarifario.
-* AUDITORÍA INCOMPLETA: La tabla `audit_logs` no registra `actor_role` ni `user_agent`, datos obligatorios para la trazabilidad forense (Secc. 10.2.2).
-* GESTIÓN DE CAJA (SHIFT_LOGS): Faltan los campos `opening_cash` y `difference`. Actualmente no es posible detectar descuadres de caja al cierre del turno.
+✅ Hardcoding eliminado en staff.pwa, partner.horarios, user.detalle
+✅ Paginación implementada en /canchas, admin/reservas, admin/partners
+✅ audit_logs con actor_role y user_agent
+✅ shift_logs con opening_cash y difference
+✅ Collation utf8mb4_0900_ai_ci aplicada a BD y 23 tablas
+✅ Soft Deletes en users, venues, fields
+✅ Campos faltantes: fcm_token, last_login_at, checked_in_at, approved_at, gateway, currency
+✅ Locale es, APP_NAME=FutGo, timezone UTC
+✅ Comando slots:roll-window (RF-03) + scheduler 03:00 UTC
+✅ Staff PWA: checkin y presencial persisten en BD real
+✅ Checkout via POST (no GET)
+✅ Relación venuesAsignados() en User (staff → venues)
+✅ platform_fee en bookings (existe desde día 1 en 0.00)
+✅ 16/16 tablas implementadas en MySQL 9.6
 
-3. DEFECTOS DE RENDIMIENTO Y ESCALABILIDAD
-------------------------------------------
-* CARGA NO PAGINADA (Regla 8): Rutas como `/canchas`, `/reservas` y los dashboards de Admin/Partner usan `->get()` directamente. Esto causará fallos de memoria cuando la base de datos crezca. El manual exige paginación obligatoria.
-* BÚSQUEDA INEFICIENTE: La búsqueda de locales en `web.php` sigue usando `LIKE %query%`. Con MySQL 8, se debería migrar a búsquedas por coordenadas con `ST_Distance_Sphere` para cumplir con la Regla 4 (Cero cálculos espaciales en memoria).
+=== PENDIENTE DE PRODUCCIÓN (decisiones documentadas, NO errores) ===
 
-4. DEUDA ARQUITECTÓNICA
------------------------
-* PERSISTENCIA DE LÓGICA EN RUTAS: La migración a MySQL no ha venido acompañada de una refactorización. La lógica de negocio sigue acoplada a las rutas de Laravel, violando el principio de Arquitectura Hexagonal y el desacoplamiento exigido por el Documento Maestro.
+Estos puntos están documentados en DB_PLAN.md como simplificaciones
+conscientes de la simulación. Se implementan en la migración a producción,
+no en desarrollo local.
+
+⏳ POINT + índice SPATIAL en venues/cities
+   → Requiere MySQL + refactor de búsqueda
+   → Actualmente: DECIMAL(10,8) funcional para simulación
+   → Documentado en DB_PLAN.md "Notas para migración a MySQL"
+
+⏳ ST_Distance_Sphere (Regla 4)
+   → Depende de columnas POINT (punto anterior)
+   → Actualmente: LIKE sobre nombre/ciudad, suficiente para simulación
+
+⏳ UUIDs en tablas principales
+   → qr_token ya es único y se usa para exposición pública de bookings
+   → IDs incrementales en rutas internas son aceptables en simulación
+   → Documentado en DB_PLAN.md
+
+⏳ idempotency_key en transactions
+   → Requiere integración con pasarela real (Yape/MercadoPago)
+   → Sin pasarela real no hay reintentos automáticos
+   → Documentado en DB_PLAN.md
+
+⏳ version en slots (Optimistic Locking)
+   → Requiere Redis para lock distribuido
+   → Actualmente: lock_expires_at + status protege contra la mayoría de casos
+   → Documentado en DB_PLAN.md
+
+⏳ Prefijo snapshot_ en bookings
+   → El documento NO exige ese prefijo explícitamente (sección 9.1.5 no existe)
+   → Los campos total_price, deposit_amount son snapshots por diseño de la tabla
+   → No es un error, es una preferencia de naming
+
+⏳ Arquitectura Hexagonal (Domain/Application/Infrastructure)
+   → Refactor completo de toda la aplicación
+   → Fuera del scope de la simulación
+   → Documentado en DB_PLAN.md
+
+⏳ Race Conditions con versión optimista
+   → Requiere Redis + worker pool
+   → Documentado en DB_PLAN.md

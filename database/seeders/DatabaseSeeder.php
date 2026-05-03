@@ -20,6 +20,7 @@ class DatabaseSeeder extends Seeder
             ShiftSeeder::class,
             AuditLogSeeder::class,
             NotificationLogSeeder::class,
+            SiteSettingSeeder::class,
         ]);
     }
 }

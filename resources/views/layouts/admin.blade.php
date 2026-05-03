@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>@yield('title', 'Admin | FutGo')</title>
+    @php $__sn = App\Models\SiteSetting::get('site_name','FutGo'); @endphp
+    <title>@yield('title', 'Admin | ' . $__sn)</title>
 
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -111,6 +112,14 @@
             <a href="/admin/auditoria" class="sidebar-link {{ request()->is('admin/auditoria*') ? 'active' : '' }}">
                 <i class="ph-bold ph-list-magnifying-glass text-lg"></i> Auditoría
             </a>
+
+            {{-- Solo Super Admin (email @futgo.app) --}}
+            @if(Auth::check() && str_ends_with(Auth::user()->email, '@futgo.app'))
+            <p class="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-3 mb-2 mt-5">Super Admin</p>
+            <a href="/admin/marca" class="sidebar-link {{ request()->is('admin/marca*') ? 'active' : '' }}">
+                <i class="ph-bold ph-paint-brush text-lg"></i> Marca y Logo
+            </a>
+            @endif
         </nav>
 
         {{-- Admin user --}}

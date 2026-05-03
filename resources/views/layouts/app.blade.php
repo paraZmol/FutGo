@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>@yield('title', config('app.name', 'FutGo') . ' | Reserva tu Cancha')</title>
+    @php $__siteName = App\Models\SiteSetting::get('site_name', config('app.name', 'FutGo')); @endphp
+    <title>@yield('title', $__siteName . ' | Reserva tu Cancha')</title>
+    @php $__favicon = App\Models\SiteSetting::get('site_favicon'); @endphp
+    @if($__favicon)
+    <link rel="icon" type="image/png" href="{{ $__favicon }}">
+    @endif
 
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -85,11 +90,19 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-16 md:h-20">
                 <!-- Logo -->
+                @php
+                    $siteName = App\Models\SiteSetting::get('site_name', 'FutGo');
+                    $siteLogo = App\Models\SiteSetting::get('site_logo');
+                @endphp
                 <a href="/" class="flex items-center gap-2 cursor-pointer group">
-                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-brand-500/30 group-hover:scale-105 transition-transform">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-emerald-600 flex items-center justify-center shadow-lg shadow-brand-500/30 group-hover:scale-105 transition-transform overflow-hidden">
+                        @if($siteLogo)
+                        <img src="{{ $siteLogo }}" alt="{{ $siteName }}" class="w-full h-full object-cover">
+                        @else
                         <i class="ph-bold ph-soccer-ball text-white text-xl"></i>
+                        @endif
                     </div>
-                    <span class="font-bold text-2xl tracking-tight text-slate-900 dark:text-white hidden sm:block">Fut<span class="text-brand-500">Go</span></span>
+                    <span class="font-bold text-2xl tracking-tight text-slate-900 dark:text-white hidden sm:block">{{ $siteName }}</span>
                 </a>
 
                 <!-- Links Desktop -->

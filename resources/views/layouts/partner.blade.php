@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>@yield('title', 'Partner | FutGo')</title>
+    @php $__sn = App\Models\SiteSetting::get('site_name','FutGo'); @endphp
+    <title>@yield('title', 'Partner | ' . $__sn)</title>
 
     <script>
         if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -78,7 +79,7 @@
                     <i class="ph-bold ph-soccer-ball text-white text-lg"></i>
                 </div>
                 <div>
-                    <span class="font-bold text-lg text-slate-900 dark:text-white">Fut<span class="text-brand-500">Go</span></span>
+                    <span class="font-bold text-lg text-slate-900 dark:text-white">{{ App\Models\SiteSetting::get('site_name','FutGo') }}</span>
                     <span class="block text-[10px] font-bold text-slate-400 uppercase tracking-widest -mt-0.5">Partner</span>
                 </div>
             </a>

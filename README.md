@@ -2,79 +2,85 @@
 
 ![FutGo Banner](futgo_readme_banner_1777823008034.png)
 
-## 🌟 Visión del Proyecto
-FutGo es una plataforma integral diseñada para digitalizar y optimizar la experiencia de reserva de campos deportivos. Conecta a jugadores con complejos deportivos (Partners) a través de un ecosistema que incluye una PWA para Staff, paneles de administración avanzada y una interfaz de usuario intuitiva y de alto rendimiento.
+## 🌟 Visión y Problemática
+### El Problema
+La gestión de complejos deportivos en entornos urbanos sufre de una fragmentación crítica:
+*   **Gestión Manual:** Uso de cuadernos o Excel, propenso a errores humanos y sobre-reservas.
+*   **Falta de Visibilidad:** Los jugadores no pueden conocer la disponibilidad real sin llamar por teléfono.
+*   **Inseguridad en Pagos:** Riesgo de "No-shows" (inasistencias) sin garantía de cobro.
+*   **Descontrol de Caja:** Dificultad para auditar los ingresos en efectivo de múltiples turnos de staff.
+
+### La Solución: FutGo
+FutGo digitaliza el ciclo completo de vida de una reserva deportiva, proporcionando:
+1.  **Transaccionalidad Segura:** Pagos de anticipos online para garantizar la reserva.
+2.  **Inventario en Tiempo Real:** Generación automatizada de slots y protección contra concurrencia.
+3.  **Auditoría Forense:** Registro inmutable de cada acción (Audit Logs) y cuadre de caja (Shift Logs).
+4.  **Ecosistema Multirrol:** Interfaces especializadas para cada actor del sistema.
 
 ---
 
-## 🛠️ Stack Tecnológico
-*   **Core:** Laravel 11 (PHP 8.2+)
-*   **Base de Datos:** MySQL 8.0 (Motor transaccional con soporte Geospacial)
-*   **Frontend:** Blade Templates + Tailwind CSS + Vite
-*   **Iconografía:** Phosphor Icons
-*   **Infraestructura:** Soporte para Redis (Cache/Sessions) y Arquitectura Hexagonal.
+## 📊 Especificaciones Técnicas
+
+### Stack de Tecnología (Sección 9.1)
+*   **Lenguaje:** PHP 8.2.x (Tipado estricto habilitado)
+*   **Framework:** Laravel 11.x (Core del Sistema)
+*   **Base de Datos:** MySQL 8.0.x (Configuración: `utf8mb4_0900_ai_ci`)
+*   **Cache & Concurrencia:** Redis 7.x (Estrategia de Optimistic Locking)
+*   **Frontend:** JavaScript ES6+, Blade, Tailwind CSS 3.x, Phosphor Icons
+*   **Geolocalización:** Soporte nativo para tipos `POINT` y funciones `ST_*`
+
+### Metodologías y Reglas de Oro (Sección 1.2)
+1.  **Regla 4 (Cero Cálculos en Memoria):** Las búsquedas por radio y distancia se ejecutan al 100% en el motor de base de datos (MySQL 8).
+2.  **Regla 8 (Escalabilidad):** Carga perezosa (*Lazy Loading*) y paginación obligatoria en todas las vistas de administración y búsqueda.
+3.  **Inmutabilidad:** Registro de auditoría forense (`audit_logs`) con seguimiento de `actor_role` y `user_agent` (Secc. 10.2.2).
+4.  **Desacoplamiento:** Transición activa hacia Arquitectura Hexagonal para independizar la lógica de negocio de la infraestructura.
 
 ---
 
-## 🏗️ Arquitectura del Sistema
-El proyecto está en proceso de migración hacia una **Arquitectura Hexagonal (Puertos y Adaptadores)** para garantizar el desacoplamiento de la lógica de negocio y facilitar la escalabilidad.
+## 🏗️ Arquitectura y Casos de Uso
+
+### Patrón Arquitectónico
+El sistema implementa una **Arquitectura de Capas Desacopladas**, evolucionando hacia un modelo Hexagonal:
 
 ```mermaid
-graph TD
-    subgraph "Infrastructure Layer"
-        P[Persistence - MySQL]
-        A[External APIs - MercadoPago]
-        W[Web Controllers]
+graph LR
+    subgraph "Ports (Interfaces)"
+        API[API Endpoints]
+        Web[Web Interface]
+        CLI[Artisan Commands]
     end
     
-    subgraph "Application Layer"
-        UC[Use Cases / Services]
+    subgraph "Core (Domain & Application)"
+        UC[Use Cases]
+        E[Entities/Models]
     end
     
-    subgraph "Domain Layer"
-        E[Entities]
-        VO[Value Objects]
-        R[Repository Interfaces]
+    subgraph "Adapters (Infrastructure)"
+        DB[(MySQL 8)]
+        Redis[(Redis Cache)]
+        MP[MercadoPago SDK]
     end
     
-    W --> UC
-    UC --> R
-    P -.-> R
-    UC --> E
+    Ports --> Core
+    Core --> Adapters
 ```
 
-### Principios de Diseño
-1.  **Cero Cálculos en Memoria:** Búsquedas geospaciales delegadas a MySQL 8 mediante `ST_Distance_Sphere`.
-2.  **Concurrencia Garantizada:** Uso de *Optimistic Locking* (versión en slots) para evitar sobre-reservas.
-3.  **Inmutabilidad:** Registro de auditoría (`audit_logs`) y snapshots de precios en el momento de la reserva.
-4.  **Seguridad:** IDs públicos basados en UUIDs e idempotencia en transacciones financieras.
+### Casos de Uso Principales
 
----
+#### 👤 Jugador (Player)
+1.  **UC-01: Búsqueda Geospacial:** Localizar canchas disponibles en un radio de acción específico.
+2.  **UC-02: Reserva Multinivel:** Seleccionar múltiples horas y campos en una sola transacción.
+3.  **UC-03: Pago de Anticipo:** Garantizar la reserva mediante pasarela de pago segura.
 
-## 📦 Módulos Principales
+#### 🤝 Complejo (Partner)
+1.  **UC-04: Gestión de Inventario:** Configurar matrices de precios dinámicos (Día/Noche/Especial).
+2.  **UC-05: Monitor de Ingresos:** Visualizar KPIs de ocupación y rentabilidad.
+3.  **UC-06: Gestión de Staff:** Asignar y revocar permisos a trabajadores del complejo.
 
-### 👤 Jugador (Player)
-*   Búsqueda avanzada por ubicación y tipo de campo.
-*   Reserva de múltiples slots contiguos.
-*   Checkout seguro con MercadoPago y anticipos online.
-*   Perfil con historial y QR dinámico de acceso.
-
-### 🤝 Complejo (Partner)
-*   Dashboard de métricas e ingresos en tiempo real.
-*   Gestión de matriz de horarios y precios diferenciales (Día/Noche).
-*   Configuración de bloqueos especiales y eventos.
-*   Administración de Staff asignado.
-
-### 📱 Staff PWA
-*   Interfaz optimizada para móviles (Offline-first ready).
-*   Escaneo de QR para Check-in instantáneo.
-*   Registro de reservas presenciales (*Walk-ins*).
-*   Gestión y auditoría de caja por turno.
-
-### 🛡️ Administración (Admin)
-*   Aprobación y monitoreo de Partners.
-*   Configuración de comisiones y fees de plataforma.
-*   Trazabilidad total mediante logs de auditoría inmutables.
+#### 📱 Staff PWA
+1.  **UC-07: Check-in por QR:** Validar y registrar la llegada del cliente en milisegundos.
+2.  **UC-08: Registro de Walk-in:** Venta directa en mostrador con actualización de inventario.
+3.  **UC-09: Cierre de Caja:** Reporte y auditoría de efectivo al finalizar el turno.
 
 ---
 
@@ -82,7 +88,7 @@ graph TD
 
 1.  **Clonar el repositorio:**
     ```bash
-    git clone <url-del-repo>
+    git clone https://github.com/paraZmol/FutGo.git
     cd futbo2
     ```
 
@@ -107,6 +113,14 @@ graph TD
     ```bash
     npm run dev
     ```
+
+## ⚙️ Personalización y Marca (Branding)
+FutGo incluye un sistema de gestión de marca dinámico que permite a los administradores (`Super Admins`) ajustar la identidad del sitio desde el panel de control sin modificar archivos de configuración:
+
+*   **Identidad Visual:** Cambio de nombre del sistema (`site_name`), eslogan (`site_tagline`) y logotipo.
+*   **Tematización:** Ajuste de colores corporativos principales que se reflejan en toda la plataforma.
+*   **Localización Global:** Configuración centralizada de moneda (`site_currency`), país y datos de contacto.
+*   **Optimización:** Los ajustes se gestionan mediante el modelo `SiteSetting` con un sistema de **Caché de alto rendimiento** (5 min) para garantizar impacto cero en la velocidad de carga.
 
 ---
 

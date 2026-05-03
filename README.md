@@ -98,7 +98,7 @@ graph LR
 1.  **Clonar el repositorio:**
     ```bash
     git clone https://github.com/paraZmol/FutGo.git
-    cd futbo2
+    cd FutGo
     ```
 
 2.  **Instalar dependencias:**

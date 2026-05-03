@@ -106,11 +106,107 @@ Route::post('/logout', function () {
     return redirect('/login');
 })->name('logout');
 
-Route::get('/registro',         fn() => view('user.registro'));
-Route::post('/registro',        fn() => redirect('/'));
+Route::get('/registro', fn() => view('user.registro'));
+Route::post('/registro', function () {
+    $data = request()->validate([
+        'nombre'   => 'required|string|max:100',
+        'email'    => 'required|email|unique:users,email',
+        'password' => 'required|min:8',
+        'telefono' => 'nullable|string|max:20',
+        'terminos' => 'accepted',
+    ], [
+        'nombre.required'   => 'El nombre es obligatorio.',
+        'email.required'    => 'El correo es obligatorio.',
+        'email.unique'      => 'Ese correo ya está registrado.',
+        'password.required' => 'La contraseña es obligatoria.',
+        'password.min'      => 'La contraseña debe tener al menos 8 caracteres.',
+        'terminos.accepted' => 'Debés aceptar los términos y condiciones.',
+    ]);
+
+    $user = User::create([
+        'name'     => $data['nombre'],
+        'email'    => $data['email'],
+        'password' => $data['password'],
+        'phone'    => $data['telefono'] ?? null,
+        'role'     => 'user',
+    ]);
+
+    auth()->login($user);
+    request()->session()->regenerate();
+
+    AuditLog::create([
+        'user_id'    => $user->id,
+        'actor_role' => 'user',
+        'action'     => 'USUARIO_REGISTRADO',
+        'payload'    => json_encode(['email' => $user->email]),
+        'ip_address' => request()->ip(),
+        'user_agent' => request()->userAgent(),
+    ]);
+
+    return redirect('/')->with('success', '¡Bienvenido, ' . $user->name . '!');
+});
 Route::get('/registro-partner', fn() => view('user.registro_partner'));
-Route::post('/registro-partner',fn() => redirect('/registro-partner/enviado'));
-Route::get('/registro-partner/enviado', fn() => view('user.registro_partner'));
+Route::post('/registro-partner', function () {
+    $data = request()->validate([
+        'nombre_complejo' => 'required|string|max:150',
+        'ciudad'          => 'required|string|max:100',
+        'distrito'        => 'required|string|max:100',
+        'direccion'       => 'required|string|max:200',
+        'canchas'         => 'required|integer|min:1|max:30',
+        'tipo'            => 'required|in:futbol5,futbol7,futbol11,mixto',
+        'nombre'          => 'required|string|max:100',
+        'email'           => 'required|email|unique:users,email',
+        'whatsapp'        => 'required|string|max:20',
+        'mensaje'         => 'nullable|string|max:1000',
+    ], [
+        'email.unique' => 'Ya existe una cuenta con ese correo.',
+    ]);
+
+    // Crear usuario partner con estado pendiente (sin contraseña — se enviará por email al aprobar)
+    $user = User::create([
+        'name'     => $data['nombre'],
+        'email'    => $data['email'],
+        'password' => bcrypt(str_random(32)), // temporal, se resetea al aprobar
+        'phone'    => $data['whatsapp'],
+        'role'     => 'partner',
+    ]);
+
+    // Crear el venue en estado "pending" para que el admin lo apruebe
+    $city = City::where('name', 'like', '%' . $data['ciudad'] . '%')
+        ->orWhere('slug', strtolower($data['ciudad']))
+        ->first();
+
+    Venue::create([
+        'user_id'     => $user->id,
+        'city_id'     => $city?->id,
+        'name'        => $data['nombre_complejo'],
+        'slug'        => \Illuminate\Support\Str::slug($data['nombre_complejo'] . '-' . time()),
+        'address'     => $data['direccion'],
+        'district'    => $data['distrito'],
+        'latitude'    => $city?->latitude ?? 0,
+        'longitude'   => $city?->longitude ?? 0,
+        'status'      => 'pending',
+        'description' => $data['mensaje'] ?? null,
+        'phone'       => $data['whatsapp'],
+    ]);
+
+    AuditLog::create([
+        'user_id'    => null,
+        'actor_role' => 'guest',
+        'action'     => 'PARTNER_SOLICITUD',
+        'payload'    => json_encode([
+            'nombre'   => $data['nombre'],
+            'email'    => $data['email'],
+            'complejo' => $data['nombre_complejo'],
+            'ciudad'   => $data['ciudad'],
+        ]),
+        'ip_address' => request()->ip(),
+        'user_agent' => request()->userAgent(),
+    ]);
+
+    return redirect('/registro-partner/enviado');
+});
+Route::get('/registro-partner/enviado', fn() => view('user.registro_partner_ok'));
 Route::get('/recuperar', fn() => view('user.recuperar'));
 
 // ─────────────────────────────────────────────────────────────
